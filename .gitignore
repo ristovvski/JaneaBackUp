@@ -1,0 +1,35 @@
+# This is a DOCUMENTATION repository. Everything that is not markdown is excluded by default, so a
+# careless `git add .` cannot sweep in a workflow export or a credential file. See SECURITY.md.
+
+# credentials and certificates
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.pfx
+*_ca_bundle*
+
+# workflow exports and API captures: credential references, live webhook paths, raw prospect data
+*.json
+!package.json
+
+# tooling and run output
+*.py
+*.ps1
+*.sh
+*.log
+*.out
+*.out.log
+__pycache__/
+.venv/
+
+# provider data dumps
+*.csv
+*.xlsx
+*.xls
+
+# OS noise
+Thumbs.db
+desktop.ini
+.DS_Store
