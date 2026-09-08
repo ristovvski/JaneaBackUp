@@ -400,6 +400,7 @@ One file per task, every day: what was done, what is partial, what is blocked, w
 * [task-logs/2026-09-03_i04-simplification.md](docs/task-logs/2026-09-03_i04-simplification.md)
 * [task-logs/2026-09-03_presentation-stages-2-to-5-and-archive.md](docs/task-logs/2026-09-03_presentation-stages-2-to-5-and-archive.md)
 * [task-logs/2026-09-03_wf2-state-port-and-claims-retention.md](docs/task-logs/2026-09-03_wf2-state-port-and-claims-retention.md)
+* [task-logs/2026-09-08_github-docs-export.md](docs/task-logs/2026-09-08_github-docs-export.md)
 
 
 ## Chat history

@@ -10,7 +10,7 @@ Assistant reasoning, tool results, and raw API payloads are not included (see [.
 | session | window | instructions | tool calls | size |
 |---|---|---|---|---|
 | [Проверить доступ к n8n workflow factory](sessions/2026-07-23_83837846_проверить-доступ-к-n8n-workflow-factory.md) | 2026-07-23 07:42:16 → 2026-08-11 07:29:02 | 41 | 485 | 290 KB |
-| [Implement W1.0.1 fixes for HeyReach receiver workflow](sessions/2026-07-29_818a9f5f_implement-w1-0-1-fixes-for-heyreach-receiver-workflo.md) | 2026-07-29 17:25:23 → 2026-09-08 08:55:45 | 245 | 2241 | 1406 KB |
+| [Implement W1.0.1 fixes for HeyReach receiver workflow](sessions/2026-07-29_818a9f5f_implement-w1-0-1-fixes-for-heyreach-receiver-workflo.md) | 2026-07-29 17:25:23 → 2026-09-08 09:02:02 | 245 | 2267 | 1411 KB |
 | [Подготовить отчет неправильно привязанных лидов для Славы](sessions/2026-08-04_0a8748b2_подготовить-отчет-неправильно-привязанных-лидов-для.md) | 2026-08-04 15:59:58 → 2026-08-04 17:25:04 | 2 | 132 | 45 KB |
 | [Install Zapier-MCP globally and configure OAuth](sessions/2026-08-05_e9e9bef0_install-zapier-mcp-globally-and-configure-oauth.md) | 2026-08-05 09:25:01 → 2026-08-05 09:27:19 | 2 | 2 | 3 KB |
 | [Access Zapier MCP integration](sessions/2026-08-05_1aaa34e3_access-zapier-mcp-integration.md) | 2026-08-05 09:47:49 → 2026-08-28 13:22:11 | 161 | 3530 | 1187 KB |
