@@ -23,7 +23,8 @@
     "patch": "node n8n/patch/patch.mjs",
     "gen:prompts": "node scripts/gen_prompts.mjs",
     "check:nodes": "node scripts/check_nodes.mjs",
-    "gen:nodes": "node scripts/gen_nodes.mjs"
+    "gen:nodes": "node scripts/gen_nodes.mjs",
+    "proof": "node scripts/discriminating_proof.mjs --write"
   },
   "dependencies": {
     "ajv": "^8.17.1",
