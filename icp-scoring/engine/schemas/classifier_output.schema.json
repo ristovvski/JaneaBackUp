@@ -1,0 +1,104 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://janeasystems.com/icp/classifier_output.schema.json",
+  "title": "Classifier output",
+  "description": "One schema for all seven classifiers; `component` discriminates. The base shape is §7 of the build task verbatim; the allOf tail adds the per-component `value` constraints so a classifier cannot return a level for a vertical or a vertical for a level.",
+  "type": "object",
+  "required": ["component", "value", "evidence", "confidence", "missing_inputs"],
+  "additionalProperties": false,
+  "properties": {
+    "component": {
+      "enum": [
+        "industry_vertical", "stage_maturity", "company_type", "geography",
+        "revenue_range", "activation_state", "buying_signal"
+      ]
+    },
+    "value": {
+      "oneOf": [
+        { "enum": [0, 3, 7, 10] },
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 200 },
+      "maxItems": 6
+    },
+    "confidence": { "enum": ["high", "medium", "low"] },
+    "missing_inputs": { "type": "array", "items": { "type": "string" } },
+    "evidence_dated_within_months": { "type": ["integer", "null"] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "component": { "const": "industry_vertical" } }, "required": ["component"] },
+      "then": {
+        "properties": {
+          "value": {
+            "oneOf": [
+              { "enum": [
+                "FinTech",
+                "HealthTech / MedTech",
+                "SportsTech",
+                "Analytics / ML",
+                "Data Platform SaaS",
+                "SaaS — Other",
+                "Manufacturing tech / Industrial IoT",
+                "Enterprise Tech / Hyperscalers",
+                "Pharma / Life Sciences",
+                "EdTech",
+                "LegalTech",
+                "ClimaTech",
+                "Government / Public Sector",
+                "Pure Hardware / Consumer Electronics",
+                "Telecom / 5G Infrastructure",
+                "E-commerce / Retail Tech",
+                "Pre-product Startups"
+              ] },
+              { "type": "null" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "component": { "const": "activation_state" } }, "required": ["component"] },
+      "then": {
+        "properties": {
+          "value": {
+            "oneOf": [
+              { "enum": ["Accelerating", "Transitioning", "Stable", "Contracting"] },
+              { "type": "null" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "component": {
+            "enum": ["stage_maturity", "company_type", "geography", "revenue_range", "buying_signal"]
+          }
+        },
+        "required": ["component"]
+      },
+      "then": {
+        "properties": {
+          "value": { "oneOf": [{ "enum": [0, 3, 7, 10] }, { "type": "null" }] }
+        }
+      }
+    },
+    {
+      "comment": "Contracting must carry dated evidence inside the rubric window, or the classifier should have returned Stable. The engine downgrades it anyway (S9) but the schema makes the omission visible at the boundary.",
+      "if": {
+        "properties": {
+          "component": { "const": "activation_state" },
+          "value": { "const": "Contracting" }
+        },
+        "required": ["component", "value"]
+      },
+      "then": { "required": ["evidence_dated_within_months"] }
+    }
+  ]
+}

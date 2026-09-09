@@ -16,13 +16,18 @@
 //     ICP_CLAY_WEBHOOK_URL, ICP_CLAY_CALLBACK_URL,
 //     ICP_AUDIT_SHEET_ID,   ICP_SLACK_CHANNEL
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const RUBRIC = JSON.parse(readFileSync(join(ROOT, 'config', 'rubric_v5.json'), 'utf8'));
-const FIELDS = JSON.parse(readFileSync(join(ROOT, 'config', 'pipedrive_fields.json'), 'utf8'));
+// Prefer the live registry a create_fields run produced; fall back to the
+// committed placeholder template so a fresh clone can still build and test.
+const FIELDS_LOCAL = join(ROOT, 'config', 'pipedrive_fields.local.json');
+const FIELDS_TEMPLATE = join(ROOT, 'config', 'pipedrive_fields.json');
+const FIELDS_PATH = existsSync(FIELDS_LOCAL) ? FIELDS_LOCAL : FIELDS_TEMPLATE;
+const FIELDS = JSON.parse(readFileSync(FIELDS_PATH, 'utf8'));
 
 export const ENV_KEYS = {
   clay_webhook_url: 'ICP_CLAY_WEBHOOK_URL',
@@ -122,7 +127,7 @@ if (isMain) {
   writeFileSync(join(ROOT, 'n8n', 'nodes', 'CONFIG.json'), pretty, 'utf8');
   process.stdout.write(
     `wrote n8n/nodes/CONFIG.json (${pretty.length} bytes, ${Object.keys(config).length} keys)\n` +
-    `  field registry status: ${FIELDS.status}\n` +
+    `  field registry: ${FIELDS_PATH.endsWith('.local.json') ? 'live (.local.json)' : 'placeholder template'}, status=${FIELDS.status}\n` +
     `  env-sourced at runtime: ${Object.values(ENV_KEYS).join(', ')}\n`
   );
 }

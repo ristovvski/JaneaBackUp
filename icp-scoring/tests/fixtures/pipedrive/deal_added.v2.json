@@ -1,0 +1,39 @@
+{
+  "_fixture": "deal_added.v2",
+  "_source": "Pipedrive Webhooks v2 delivery, event_action=create / event_object=deal. Envelope shape per https://pipedrive.readme.io/docs/guide-for-webhooks-v2 (meta + data + previous; previous is null for a create). Field names verified against that guide: note is_bulk_edit, not is_bulk_update.",
+  "meta": {
+    "action": "create",
+    "entity": "deal",
+    "entity_id": "55001",
+    "id": "evt-2026-09-09-000111",
+    "company_id": "1234567",
+    "user_id": "12914044",
+    "webhook_id": "9001",
+    "webhook_owner_id": "12914044",
+    "correlation_id": "b7f2c1a0-1e2d-4c3b-9a8f-0d1e2f3a4b5c",
+    "attempt": 1,
+    "host": "janeasystems.pipedrive.com",
+    "timestamp": "2026-09-09T10:14:52.412Z",
+    "type": "general",
+    "version": "2.0",
+    "change_source": "app",
+    "is_bulk_edit": false,
+    "permitted_user_ids": [12914044]
+  },
+  "data": {
+    "id": 55001,
+    "title": "Akuvo — inbound",
+    "value": 0,
+    "currency": "USD",
+    "org_id": 10001,
+    "person_id": 77001,
+    "stage_id": 3,
+    "pipeline_id": 1,
+    "status": "open",
+    "owner_id": 12914044,
+    "add_time": "2026-09-09T10:14:52Z",
+    "update_time": "2026-09-09T10:14:52Z",
+    "custom_fields": {}
+  },
+  "previous": null
+}

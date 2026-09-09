@@ -1,4 +1,64 @@
+# icp-scoring — subtree ignore rules.
+#
+# The repository root excludes `*.json` wholesale (see SECURITY.md: "workflow
+# exports and API captures: credential references, live webhook paths, raw
+# prospect payloads"). That default is right, but it also silently swallowed
+# this subtree's sources on the first push — the rubric, the schemas and every
+# fixture — so `npm test` could not pass from a fresh clone.
+#
+# The fix is an explicit ALLOW-LIST below, not a blanket un-ignore. Anything
+# not named here stays excluded by the root rule. Adding a new JSON source
+# means adding a line, which is the point: it is a decision, not an accident.
+
 node_modules/
 tests/golden/.cache/
+
+# ---------------------------------------------------------------------------
+# credentials — never, in any spelling
+# ---------------------------------------------------------------------------
 .env
+.env.*
+*.env
+env.*
+!engine/prompts/*.md
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+*_ca_bundle*
 *.local
+secrets*
+credentials*
+
+# ---------------------------------------------------------------------------
+# build artefacts that carry credential references or a webhook path
+#
+# WF-ICP-Score.dev.json embeds `credentials` blocks and the webhook paths, and
+# SECURITY.md is explicit that an n8n webhook path IS the credential. It is not
+# committed. It does not need to be: n8n/patch/patch.mjs rebuilds it
+# byte-identically from the tracked sources, and `npm test` runs the patcher
+# first (see the `pretest` script), so a fresh clone reproduces it.
+# ---------------------------------------------------------------------------
+n8n/workflows/*.json
+
+# The live Pipedrive field registry holds real 40-hex field keys and option
+# ids for a specific account. Not credentials, but account identifiers with no
+# business being in git. config/pipedrive_fields.json stays the placeholder
+# template; a live create_fields run writes the .local.json beside it.
+config/pipedrive_fields.local.json
+
+# ---------------------------------------------------------------------------
+# allow-list: the JSON sources this subtree cannot work without
+# ---------------------------------------------------------------------------
+!config/rubric_v5.json
+!config/pipedrive_fields.json
+!config/clay.example.json
+!engine/schemas/*.json
+!n8n/nodes/CONFIG.json
+!tests/fixtures/pipedrive/*.json
+!tests/fixtures/clay/*.json
+!tests/golden/expected.json
+!tests/golden/facts/*.json
+!package.json
+!package-lock.json

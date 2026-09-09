@@ -10,10 +10,11 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { validate, CONTINUE_ON_FAIL_ALLOWLIST, MUST_NOT_RETRY } from '../../n8n/patch/validate.mjs';
+import { PLACEHOLDER_PATH_A, PLACEHOLDER_PATH_B, USING_PLACEHOLDER_PATHS, stripCredentials } from '../../n8n/patch/patch.mjs';
 import { buildConfig, ENV_KEYS } from '../../scripts/gen_config_node.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -40,6 +41,50 @@ describe('the patcher and the artefact agree', () => {
     assert.ok(raw.endsWith('\n'));
   });
 
+  test('the DEV import payload attaches NO credentials', () => {
+    // Imported into a shared instance, the workflow must not be able to reach
+    // Pipedrive, Slack or Sheets before a human has attached credentials.
+    const payload = JSON.parse(
+      readFileSync(join(ROOT, 'n8n', 'workflows', 'import-dev-no-credentials.json'), 'utf8')
+    );
+    const withCredentials = payload.nodes.filter((n) => n.credentials);
+    assert.deepEqual(withCredentials.map((n) => n.name), [], 'no node may carry credentials');
+    assert.ok(!JSON.stringify(payload).includes('"credentials"'));
+  });
+
+  test('the DEV import payload is tagged DEV in its name and is not active', () => {
+    const payload = JSON.parse(
+      readFileSync(join(ROOT, 'n8n', 'workflows', 'import-dev-no-credentials.json'), 'utf8')
+    );
+    assert.match(payload.name, /\[DEV\]$/, 'the name must mark it as DEV in any workflow list');
+    assert.ok(!('active' in payload), 'active is not settable on import; arming is a human act');
+  });
+
+  test('the import payload is otherwise identical to the canonical export', () => {
+    // Same graph, same node parameters, same settings — credentials and the
+    // name are the only differences, so reviewing one reviews both.
+    const payload = stripCredentials(wf);
+    assert.deepEqual(payload.connections, wf.connections);
+    assert.deepEqual(payload.settings, wf.settings);
+    assert.equal(payload.nodes.length, wf.nodes.length);
+    for (let i = 0; i < wf.nodes.length; i += 1) {
+      const { credentials, ...expected } = wf.nodes[i];
+      assert.deepEqual(payload.nodes[i], expected, wf.nodes[i].name);
+    }
+  });
+
+  test('the canonical export is NOT tracked by git (it carries credential refs)', () => {
+    // SECURITY.md excludes workflow exports. The patcher rebuilds this file
+    // byte-identically, and `pretest` runs the patcher, so a fresh clone still
+    // has it for the tests.
+    let tracked = true;
+    try {
+      execFileSync('git', ['ls-files', '--error-unmatch', 'n8n/workflows/WF-ICP-Score.dev.json'],
+        { cwd: ROOT, stdio: 'pipe' });
+    } catch { tracked = false; }
+    assert.equal(tracked, false, 'the export must stay out of git; the patcher regenerates it');
+  });
+
   test('api-payload.json carries only the four API-writable keys', () => {
     const payload = JSON.parse(readFileSync(join(ROOT, 'n8n', 'workflows', 'api-payload.json'), 'utf8'));
     assert.deepEqual(Object.keys(payload).sort(), ['connections', 'name', 'nodes', 'settings']);
@@ -62,9 +107,54 @@ describe('deployment safety', () => {
     assert.equal(wf.settings.errorWorkflow, 'WF-ERR');
   });
 
-  test('the webhook paths are DEV-scoped, so importing cannot collide with production', () => {
-    for (const node of wf.nodes.filter((n) => n.type === 'n8n-nodes-base.webhook')) {
-      assert.match(node.parameters.path, /-dev$/, `${node.name} path must end in -dev`);
+  test('the committed source holds a PLACEHOLDER webhook path, never a live one', () => {
+    // SECURITY.md: "an n8n webhook path is the only authentication those
+    // endpoints have ... The path IS the credential." So a real path must
+    // never be reachable from git. The patcher takes it from
+    // ICP_WEBHOOK_PATH_A/B at build time and defaults to a placeholder.
+    const source = readFileSync(join(ROOT, 'n8n', 'patch', 'patch.mjs'), 'utf8');
+    assert.ok(
+      source.includes("process.env.ICP_WEBHOOK_PATH_A"),
+      'the path must come from the environment, not a literal'
+    );
+    for (const placeholder of [PLACEHOLDER_PATH_A, PLACEHOLDER_PATH_B]) {
+      assert.match(placeholder, /^REPLACE-ME-/, 'the default must be obviously not-a-real-path');
+    }
+  });
+
+  test('a build with no path set produces the placeholder, and says so', () => {
+    // This suite runs without ICP_WEBHOOK_PATH_* set, so the export under test
+    // must carry the placeholders.
+    if (process.env.ICP_WEBHOOK_PATH_A || process.env.ICP_WEBHOOK_PATH_B) return;
+    const paths = wf.nodes
+      .filter((n) => n.type === 'n8n-nodes-base.webhook')
+      .map((n) => n.parameters.path);
+    assert.deepEqual(paths, [PLACEHOLDER_PATH_A, PLACEHOLDER_PATH_B]);
+    assert.equal(USING_PLACEHOLDER_PATHS, true);
+  });
+
+  test('an env-supplied path reaches the built workflow', () => {
+    // Build in-process with the variables set, so the mechanism is proven
+    // rather than assumed. Restored afterwards.
+    const before = [process.env.ICP_WEBHOOK_PATH_A, process.env.ICP_WEBHOOK_PATH_B];
+    try {
+      process.env.ICP_WEBHOOK_PATH_A = 'unit-test-path-a';
+      process.env.ICP_WEBHOOK_PATH_B = 'unit-test-path-b';
+      const built = execFileSync(
+        process.execPath,
+        ['-e', `import('${pathToFileURL(join(ROOT, 'n8n', 'patch', 'patch.mjs')).href}')
+          .then((m) => { const w = m.buildWorkflow();
+            process.stdout.write(JSON.stringify(w.nodes
+              .filter((n) => n.type === 'n8n-nodes-base.webhook')
+              .map((n) => n.parameters.path))); });`],
+        { encoding: 'utf8', env: process.env }
+      );
+      assert.deepEqual(JSON.parse(built), ['unit-test-path-a', 'unit-test-path-b']);
+    } finally {
+      if (before[0] === undefined) delete process.env.ICP_WEBHOOK_PATH_A;
+      else process.env.ICP_WEBHOOK_PATH_A = before[0];
+      if (before[1] === undefined) delete process.env.ICP_WEBHOOK_PATH_B;
+      else process.env.ICP_WEBHOOK_PATH_B = before[1];
     }
   });
 });

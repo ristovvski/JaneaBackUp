@@ -1,0 +1,36 @@
+{
+  "_fixture": "org_already_scored_stale",
+  "_note": "Scored 200 days ago on model v5. Past the 180-day window, so the gate must RE-SCORE.",
+  "_icp_symbolic": {
+    "icp_calculated": "ICP B",
+    "icp_score": 68,
+    "icp_scored_at": "@days_ago:200",
+    "icp_model_version": "v5"
+  },
+  "_icp_symbolic_help": "The harness (tests/static/harness.mjs) expands these symbolic keys into hashed custom_fields using CONFIG, so the fixture stays readable and survives create_fields replacing the placeholder keys with real ones. `@days_ago:N` is resolved against CONFIG.now_iso at test time, so 'fresh' and 'stale' cannot rot into each other as the calendar moves.",
+  "success": true,
+  "data": {
+    "id": 10006,
+    "name": "Alloya Corporate FCU",
+    "add_time": "2026-05-02T09:11:00Z",
+    "update_time": "2026-09-01T08:00:00Z",
+    "visible_to": 3,
+    "owner_id": 12914044,
+    "label_ids": [],
+    "website": "https://alloyacorp.org",
+    "linkedin": null,
+    "industry": "Financial Services",
+    "annual_revenue": 45000000,
+    "employee_count": 310,
+    "is_deleted": false,
+    "address": {
+      "value": "1600 Broadway, Denver, CO, 80202, United States",
+      "locality": "Denver",
+      "admin_area_level_1": "Colorado",
+      "country": "United States",
+      "postal_code": "80202",
+      "formatted_address": "1600 Broadway, Denver, CO 80202, USA"
+    },
+    "custom_fields": {}
+  }
+}

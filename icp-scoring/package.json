@@ -24,7 +24,11 @@
     "gen:prompts": "node scripts/gen_prompts.mjs",
     "check:nodes": "node scripts/check_nodes.mjs",
     "gen:nodes": "node scripts/gen_nodes.mjs",
-    "proof": "node scripts/discriminating_proof.mjs --write"
+    "proof": "node scripts/discriminating_proof.mjs --write",
+    "pretest": "node n8n/patch/patch.mjs",
+    "scan:secrets": "node scripts/scan_secrets.mjs",
+    "scan:history": "node scripts/scan_secrets.mjs --history",
+    "posttest": "node scripts/scan_secrets.mjs --tracked"
   },
   "dependencies": {
     "ajv": "^8.17.1",

@@ -29,7 +29,7 @@
 
 import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import {
   normalizeDomain, normalizeLinkedInCompanyUrl, normalizeCompanyName, NON_COMPANY_HOSTS,
 } from '../engine/normalize.mjs';
@@ -121,10 +121,14 @@ if (argPages) {
     const payload = JSON.parse(readFileSync(join(argPages, file), 'utf8'));
     orgs.push(...(payload.data || []));
   }
+  // Only the directory NAME goes in the report. An absolute path can carry a
+  // session id or a username, and this file is committed.
+  const pagesLabel = basename(argPages.replace(/\/+$/, '')) || '(pages)';
   sourceNote =
     `SAMPLE of ${orgs.length} organizations from ${files.length} saved getOrganizations ` +
-    `page(s) in \`${argPages}\`, newest-first by add_time. Custom field keys are NOT resolved ` +
-    `to names in this mode (that needs GET /api/v2/organizationFields, which needs a token).`;
+    `page(s) (source directory \`${pagesLabel}\`), newest-first by add_time. Custom field keys ` +
+    `are NOT resolved to names in this mode (that needs GET /api/v2/organizationFields, which ` +
+    `needs a token).`;
 } else if (token) {
   mode = 'live';
   process.stderr.write('Live mode: paging the full organization collection (read-only)...\n');

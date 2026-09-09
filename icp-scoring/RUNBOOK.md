@@ -109,17 +109,55 @@ ICP_SLACK_CHANNEL       the channel id, e.g. the id of #gtm-ops-dev
 > four and the Clay POST will fail with an invalid URL. Set it to `false`, or
 > move the four values into a credential.
 
-### 5. Import the workflow
+### 5. Build and import the workflow
+
+The workflow export is **not in git** — it embeds `credentials` blocks and the
+webhook paths, and SECURITY.md excludes both. The patcher rebuilds it
+byte-identically, so build it first:
 
 ```bash
-# via the n8n UI: Import from File -> n8n/workflows/WF-ICP-Score.dev.json
-# or via the API, which takes only the four writable keys:
-curl -X POST "$N8N_API_URL/workflows" \
-  -H "X-N8N-API-KEY: $N8N_API_KEY" -H 'content-type: application/json' \
-  --data @n8n/workflows/api-payload.json
+# The webhook path IS the credential (SECURITY.md). Generate unguessable ones
+# and keep them out of the repo — the build reads them from the environment.
+export ICP_WEBHOOK_PATH_A="icp-a-$(openssl rand -hex 12)"
+export ICP_WEBHOOK_PATH_B="icp-b-$(openssl rand -hex 12)"
+node n8n/patch/patch.mjs
 ```
 
-The export is `active: false`. **Arming it is a human act.** Confirm on import:
+That writes three files, all gitignored:
+
+| File | Use |
+|---|---|
+| `WF-ICP-Score.dev.json` | the canonical export, with credential **names** as documentation |
+| `api-payload.json` | the four API-writable keys, credentials included |
+| `import-dev-no-credentials.json` | **import this one** — every `credentials` block stripped, name suffixed `[DEV]` |
+
+Import the credential-free payload, so the workflow cannot reach Pipedrive,
+Slack or Sheets until you attach credentials yourself:
+
+```bash
+node --env-file=/path/to/.env -e '
+  const fs = require("fs");
+  const body = fs.readFileSync("n8n/workflows/import-dev-no-credentials.json", "utf8");
+  fetch(`${process.env.N8N_BASE_URL}/api/v1/workflows`, {
+    method: "POST",
+    headers: { "X-N8N-API-KEY": process.env.N8N_API_KEY, "content-type": "application/json" },
+    body,
+  }).then(async (r) => console.log(r.status, (await r.text()).slice(0, 400)));
+'
+```
+
+Then, in the n8n UI:
+
+- [ ] add the tag **DEV** to the new workflow
+- [ ] attach the five credentials (§3) node by node
+- [ ] leave it **inactive** — arming it is yours alone
+
+> **This instance also hosts WF-1, WF-2, WF-2R and WF-2S.** Those are
+> off-limits: do not edit, deactivate or re-import any of them while doing
+> this. The import above only ever creates a new workflow — it never touches
+> an existing id.
+
+Confirm on import:
 
 - [ ] the Google Sheets node's column mapping is `autoMapInputData` and the
       `ICP_Audit` header row matches `BuildAuditRow`'s 31 columns, in order
@@ -127,6 +165,23 @@ The export is `active: false`. **Arming it is a human act.** Confirm on import:
 - [ ] both webhook nodes show their authentication set
 - [ ] `settings.errorWorkflow` resolves to the real WF-ERR (the export carries
       the name `WF-ERR`; n8n may want the id)
+
+### 5b. Verify no secret reached the repo
+
+```bash
+npm run scan:secrets     # working tree, tracked + untracked
+npm run scan:history     # every blob in every commit
+```
+
+Shape-based (JWT, `sk-`, `clay_scoped_`, 40-hex, UUID, base64, credential
+blocks, live n8n webhook URLs) and it never prints a match — printing it would
+put the secret in the log that proves the secret is absent. `npm test` runs the
+tracked-file scan automatically as `posttest`.
+
+This complements rather than replaces SECURITY.md's own gate
+(`gtm_docs_export/build_docs_repo.py`), which does the literal match against
+every `.env` value over 12 characters. Run that one too before any commit that
+touches this subtree — it is the authority, because it needs no guessing.
 
 ### 6. Create the audit sheet
 

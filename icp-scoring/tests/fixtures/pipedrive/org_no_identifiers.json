@@ -1,0 +1,24 @@
+{
+  "_fixture": "org_no_identifiers",
+  "_note": "Name only — no website, no LinkedIn, no address. NEEDS_DECISION #5 default: still scored, from name + HQ, at LOW confidence. Never 'Insufficient data' on the identifier alone.",
+  "_icp_symbolic": null,
+  "_icp_symbolic_help": "The harness (tests/static/harness.mjs) expands these symbolic keys into hashed custom_fields using CONFIG, so the fixture stays readable and survives create_fields replacing the placeholder keys with real ones. `@days_ago:N` is resolved against CONFIG.now_iso at test time, so 'fresh' and 'stale' cannot rot into each other as the calendar moves.",
+  "success": true,
+  "data": {
+    "id": 10004,
+    "name": "Stealth Robotics",
+    "add_time": "2026-05-02T09:11:00Z",
+    "update_time": "2026-09-01T08:00:00Z",
+    "visible_to": 3,
+    "owner_id": 12914044,
+    "label_ids": [],
+    "website": null,
+    "linkedin": null,
+    "industry": null,
+    "annual_revenue": null,
+    "employee_count": null,
+    "is_deleted": false,
+    "address": null,
+    "custom_fields": {}
+  }
+}

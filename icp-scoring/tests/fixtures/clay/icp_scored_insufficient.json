@@ -1,0 +1,109 @@
+{
+  "event": "icp.scored",
+  "event_id": "clay-evt-d1b2c3d4e5f6",
+  "request_id": "req-icp-0004",
+  "emitted_at": "2026-09-09T10:18:00Z",
+  "model_version": "v5",
+  "org_id": "10004",
+  "deal_id": "55004",
+  "identifier_kind": "name",
+  "identifier_value": "stealth robotics",
+  "components": {
+    "industry_vertical": {
+      "value": "Manufacturing tech / Industrial IoT",
+      "evidence": [
+        "company_name: Stealth Robotics"
+      ],
+      "confidence": "low",
+      "missing_inputs": [
+        "website_summary",
+        "li_description"
+      ]
+    },
+    "stage_maturity": {
+      "value": null,
+      "evidence": [],
+      "confidence": "low",
+      "missing_inputs": [
+        "funding_stage",
+        "open_eng_roles_count"
+      ]
+    },
+    "company_type": {
+      "value": 3,
+      "evidence": [
+        "company_name: Stealth Robotics"
+      ],
+      "confidence": "low",
+      "missing_inputs": [
+        "li_description"
+      ]
+    },
+    "geography": {
+      "value": 10,
+      "evidence": [
+        "hq_country: United States"
+      ],
+      "confidence": "medium",
+      "missing_inputs": []
+    },
+    "revenue_range": {
+      "value": null,
+      "evidence": [],
+      "confidence": "low",
+      "missing_inputs": [
+        "revenue_estimate_usd"
+      ]
+    },
+    "activation_state": {
+      "value": "Stable",
+      "evidence": [],
+      "confidence": "low",
+      "missing_inputs": [
+        "news_last_12mo"
+      ]
+    },
+    "buying_signal": {
+      "value": null,
+      "evidence": [],
+      "confidence": "low",
+      "missing_inputs": [
+        "open_eng_roles_count",
+        "news_last_12mo"
+      ]
+    }
+  },
+  "score": {
+    "model_version": "v5",
+    "industry_level": 3,
+    "industry_tier": "Opportunistic",
+    "levels_used": {
+      "industry": 3,
+      "stage_maturity": 0,
+      "company_type": 3,
+      "geography": 10,
+      "revenue_range": 0,
+      "buying_signal": 0
+    },
+    "buying_signal_level": null,
+    "composite": 22,
+    "activation_state_used": "Stable",
+    "multiplier": 0.85,
+    "final_score": 19,
+    "final_score_without_activation": 22,
+    "grade": null,
+    "status": "insufficient_data",
+    "confidence_overall": "low",
+    "tier2_candidate": false,
+    "flags": [
+      "insufficient:stage_maturity,revenue_range,company_type"
+    ]
+  },
+  "facts_summary": {
+    "revenue_usd": null,
+    "headcount_total": null,
+    "headcount_eng": null
+  },
+  "clay_table": "ICP_Engine",
+  "clay_row_url": null
+}

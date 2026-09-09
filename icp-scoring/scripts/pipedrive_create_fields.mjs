@@ -21,12 +21,18 @@
 // option id (§8.2) requires it, so this script reads options[].id back and
 // FAILS LOUDLY with NEEDS_DOC_EVIDENCE rather than guessing if it is absent.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const REGISTRY = join(ROOT, 'config', 'pipedrive_fields.json');
+// The template is committed and always holds placeholders. A live run writes
+// the .local.json beside it, which is gitignored: real field keys and option
+// ids are account identifiers and have no business in git (SECURITY.md
+// excludes API captures for exactly this reason). npm run gen:config prefers
+// the .local.json when it exists.
+const TEMPLATE = join(ROOT, 'config', 'pipedrive_fields.json');
+const REGISTRY = join(ROOT, 'config', 'pipedrive_fields.local.json');
 const BASE = 'https://api.pipedrive.com';
 
 const token = process.env.PIPEDRIVE_API_TOKEN;
@@ -43,7 +49,9 @@ if (!token) {
   process.exit(1);
 }
 
-const registry = JSON.parse(readFileSync(REGISTRY, 'utf8'));
+// Start from the live registry if a previous run produced one, so re-running
+// is genuinely idempotent; otherwise from the committed template.
+const registry = JSON.parse(readFileSync(existsSync(REGISTRY) ? REGISTRY : TEMPLATE, 'utf8'));
 
 async function api(method, path, body = null) {
   const response = await fetch(new URL(path, BASE), {
@@ -188,7 +196,7 @@ writeFileSync(REGISTRY, `${JSON.stringify(registry, null, 2)}\n`, 'utf8');
 process.stderr.write(
   `\n${summary.created.length} created, ${summary.found.length} found` +
   ` (expected ${registry.expected_field_count}).\n` +
-  `wrote config/pipedrive_fields.json\n`
+  `wrote config/pipedrive_fields.local.json (gitignored — real field keys)\n`
 );
 
 if (summary.problems.length > 0) {

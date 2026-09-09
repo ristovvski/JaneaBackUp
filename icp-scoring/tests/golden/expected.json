@@ -1,0 +1,32 @@
+{
+  "_comment": "Seeded by hand with the three validation rules §9.5 states are written into the Test Accounts sheet. scripts/export_golden_set.mjs overwrites `accounts` from the real CSV when Nik exports it, and carries `facts_file` and `hard_assertion` forward. `expected_grade: null` means the human grade is not filled in yet (Toby owes Stage/Type/Geo/Revenue) — the test then asserts only the vertical -> industry_level mapping for that row.",
+  "source": "hand-seeded from build task §9.5 (Test Accounts CSV not yet exported)",
+  "exported_at": null,
+  "model_version": "v5",
+  "accounts": [
+    {
+      "org": "Akuvo",
+      "facts_file": "SYNTHETIC_akuvo.json",
+      "vertical": "FinTech",
+      "activation": "Accelerating",
+      "expected_grade": "A",
+      "hard_assertion": "must_be_A"
+    },
+    {
+      "org": "Microsoft",
+      "facts_file": "SYNTHETIC_microsoft.json",
+      "vertical": "Enterprise Tech / Hyperscalers",
+      "activation": "Stable",
+      "expected_grade": null,
+      "hard_assertion": "must_not_be_A"
+    },
+    {
+      "org": "Merck",
+      "facts_file": "SYNTHETIC_merck.json",
+      "vertical": "Pharma / Life Sciences",
+      "activation": "Stable",
+      "expected_grade": null,
+      "hard_assertion": "must_not_be_A"
+    }
+  ]
+}

@@ -29,6 +29,7 @@ const ROOT = join(HERE, '..', '..');
 const NODES = join(ROOT, 'n8n', 'nodes');
 const OUT = join(ROOT, 'n8n', 'workflows', 'WF-ICP-Score.dev.json');
 const API_OUT = join(ROOT, 'n8n', 'workflows', 'api-payload.json');
+const IMPORT_OUT = join(ROOT, 'n8n', 'workflows', 'import-dev-no-credentials.json');
 
 const code = (name) => readFileSync(join(NODES, `${name}.js`), 'utf8');
 const CONFIG_STATIC = JSON.parse(readFileSync(join(NODES, 'CONFIG.json'), 'utf8'));
@@ -64,6 +65,29 @@ function configExpression() {
 
 const PIPEDRIVE_V2 = 'https://api.pipedrive.com/api/v2';
 const PIPEDRIVE_V1 = 'https://api.pipedrive.com/v1';
+
+// ---------------------------------------------------------------------------
+// Webhook paths.
+//
+// SECURITY.md is explicit: "an n8n webhook path is the only authentication
+// those endpoints have ... The path IS the credential." So the committed
+// source carries a PLACEHOLDER, never a live path. Set these when building an
+// export you intend to import:
+//
+//   ICP_WEBHOOK_PATH_A=<unguessable> ICP_WEBHOOK_PATH_B=<unguessable> \
+//     node n8n/patch/patch.mjs
+//
+// The generated export is gitignored, so the real path never reaches git. A
+// build with the variables unset produces the placeholder, which n8n will
+// happily register and which you must not use for anything real.
+// ---------------------------------------------------------------------------
+export const PLACEHOLDER_PATH_A = 'REPLACE-ME-icp-score-pipedrive';
+export const PLACEHOLDER_PATH_B = 'REPLACE-ME-icp-scored-clay';
+
+const WEBHOOK_PATH_A = process.env.ICP_WEBHOOK_PATH_A || PLACEHOLDER_PATH_A;
+const WEBHOOK_PATH_B = process.env.ICP_WEBHOOK_PATH_B || PLACEHOLDER_PATH_B;
+export const USING_PLACEHOLDER_PATHS =
+  WEBHOOK_PATH_A === PLACEHOLDER_PATH_A || WEBHOOK_PATH_B === PLACEHOLDER_PATH_B;
 
 const codeNode = (name, position, source, extra = {}) => ({
   parameters: { jsCode: source },
@@ -160,7 +184,7 @@ export function buildWorkflow() {
   nodes.push({
     parameters: {
       httpMethod: 'POST',
-      path: 'icp-score-pipedrive-dev',
+      path: WEBHOOK_PATH_A,
       // Pipedrive supports HTTP basic auth on the subscription
       // (http_auth_user / http_auth_password), so the endpoint is
       // authenticated rather than merely unguessable.
@@ -173,7 +197,7 @@ export function buildWorkflow() {
     type: 'n8n-nodes-base.webhook',
     typeVersion: 2,
     position: [-260, 200],
-    webhookId: 'icp-score-pipedrive-dev',
+    webhookId: WEBHOOK_PATH_A,
     credentials: { httpBasicAuth: { id: 'icp_webhook_basic', name: 'icp_webhook_basic' } },
   });
 
@@ -251,7 +275,7 @@ export function buildWorkflow() {
   nodes.push({
     parameters: {
       httpMethod: 'POST',
-      path: 'icp-scored-clay-dev',
+      path: WEBHOOK_PATH_B,
       // Header auth: X-Clay-Secret, held in the clay_webhook_secret credential.
       authentication: 'headerAuth',
       responseMode: 'responseNode',
@@ -262,7 +286,7 @@ export function buildWorkflow() {
     type: 'n8n-nodes-base.webhook',
     typeVersion: 2,
     position: [-260, 700],
-    webhookId: 'icp-scored-clay-dev',
+    webhookId: WEBHOOK_PATH_B,
     credentials: { httpHeaderAuth: { id: 'clay_webhook_secret', name: 'clay_webhook_secret' } },
   });
 
@@ -467,6 +491,30 @@ export function buildWorkflow() {
 /** Stable JSON: 2-space indent, LF, trailing newline. */
 const emit = (value) => `${JSON.stringify(value, null, 2)}\n`.replace(/\r\n/g, '\n');
 
+/**
+ * The payload to actually POST when importing into a shared instance.
+ *
+ * Every `credentials` block is REMOVED. The canonical export keeps them as
+ * name placeholders because they document which credential each node needs and
+ * the static tests assert that; but an import should attach nothing, so the
+ * imported workflow cannot reach Pipedrive, Slack or Sheets even by accident
+ * before a human has looked at it. Credentials get attached in the n8n UI, by
+ * the person who owns them.
+ *
+ * `active` stays false and is not settable through this payload anyway.
+ */
+export function stripCredentials(workflow) {
+  return {
+    name: `${workflow.name} [DEV]`,
+    nodes: workflow.nodes.map((node) => {
+      const { credentials, ...rest } = node;
+      return rest;
+    }),
+    connections: workflow.connections,
+    settings: workflow.settings,
+  };
+}
+
 const workflow = buildWorkflow();
 const findings = validate(workflow, { nodesDir: NODES });
 
@@ -501,17 +549,32 @@ if (isMain) {
     process.exit(0);
   }
 
+  const importPayload = emit(stripCredentials(workflow));
+
   writeFileSync(OUT, text, 'utf8');
   writeFileSync(API_OUT, apiPayload, 'utf8');
+  writeFileSync(IMPORT_OUT, importPayload, 'utf8');
 
   const codeNodes = workflow.nodes.filter((n) => n.type === 'n8n-nodes-base.code');
+  const credentialled = workflow.nodes.filter((n) => n.credentials).length;
   process.stdout.write(
     `wrote n8n/workflows/WF-ICP-Score.dev.json (${text.length} bytes)\n` +
     `wrote n8n/workflows/api-payload.json (${apiPayload.length} bytes)\n` +
+    `wrote n8n/workflows/import-dev-no-credentials.json (${importPayload.length} bytes)\n` +
     `  nodes: ${workflow.nodes.length} (${codeNodes.length} Code)\n` +
     `  active: ${workflow.active}  errorWorkflow: ${workflow.settings.errorWorkflow}\n` +
+    `  credentials in canonical export: ${credentialled} node(s)\n` +
+    `  credentials in import payload:   0 (stripped)\n` +
+    `  webhook paths: ${USING_PLACEHOLDER_PATHS ? 'PLACEHOLDER — set ICP_WEBHOOK_PATH_A/B for a real import' : 'from ICP_WEBHOOK_PATH_A/B'}\n` +
     `  validate(): clean\n`
   );
+  if (USING_PLACEHOLDER_PATHS) {
+    process.stdout.write(
+      '\n  NOTE: the webhook paths are placeholders. SECURITY.md treats a webhook\n' +
+      '        path as a credential, so the committed source cannot hold a real one.\n' +
+      '        Rebuild with ICP_WEBHOOK_PATH_A / ICP_WEBHOOK_PATH_B set before importing.\n'
+    );
+  }
 }
 
 export { workflow, emit };

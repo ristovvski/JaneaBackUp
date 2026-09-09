@@ -3,10 +3,10 @@
 **Read-only.** This run issued only GET requests and made no writes of any kind.
 
 - **Mode:** pages
-- **Scope:** SAMPLE of 2000 organizations from 4 saved getOrganizations page(s) in `/tmp/claude-0/-home-user-Janea/382d731f-1221-5b02-af27-c8f60b31eea5/scratchpad/pd`, newest-first by add_time. Custom field keys are NOT resolved to names in this mode (that needs GET /api/v2/organizationFields, which needs a token).
+- **Scope:** SAMPLE of 2000 organizations from 4 saved getOrganizations page(s) (source directory `pd`), newest-first by add_time. Custom field keys are NOT resolved to names in this mode (that needs GET /api/v2/organizationFields, which needs a token).
 - **Organizations analysed:** 2000
 - **add_time range:** 2026-05-02T03:28:19Z → 2026-09-08T22:23:53Z
-- **Generated:** 2026-09-09T09:01:29.420Z
+- **Generated:** 2026-09-09T11:06:13.673Z
 
 ---
 

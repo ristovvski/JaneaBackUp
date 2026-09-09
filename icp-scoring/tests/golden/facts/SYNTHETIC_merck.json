@@ -1,0 +1,98 @@
+{
+  "SYNTHETIC": true,
+  "captured_at": null,
+  "request_id": "synthetic-merck",
+  "org_id": "10003",
+  "deal_id": null,
+  "identifier_kind": "domain",
+  "identifier_value": "merck.com",
+  "domain": "merck.com",
+  "linkedin_url": "https://www.linkedin.com/company/merck",
+  "company_name": "Merck",
+  "hq_country": "United States",
+  "hq_state": "New Jersey",
+  "li_headcount": 71000,
+  "li_industry": "Pharmaceutical Manufacturing",
+  "li_description": "Global biopharmaceutical company researching, developing and manufacturing prescription medicines and vaccines.",
+  "li_founded": 1891,
+  "li_hq": "Rahway, New Jersey, United States",
+  "website_summary": "Therapeutic areas, pipeline and manufacturing. A digital and data science organisation is described as building validated internal platforms for clinical trial operations and manufacturing telemetry under GxP constraints.",
+  "revenue_estimate_usd": 64000000000,
+  "revenue_source": "Apollo",
+  "funding_stage": "Public",
+  "last_round_date": null,
+  "last_round_usd": null,
+  "open_eng_roles_count": 40,
+  "eng_roles_open_60d_plus": 11,
+  "senior_eng_roles": 6,
+  "eng_headcount_estimate": 4000,
+  "news_last_12mo": [
+    {
+      "date": "2026-02-14",
+      "headline": "Merck expands data science hub",
+      "source": "Fierce Pharma",
+      "url": null
+    }
+  ],
+  "synthetic_classifier_output": {
+    "industry_vertical": {
+      "value": "Pharma / Life Sciences",
+      "evidence": [
+        "li_industry: Pharmaceutical Manufacturing"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "stage_maturity": {
+      "value": 0,
+      "evidence": [
+        "li_headcount: 71000",
+        "eng_headcount_estimate: 4000"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "company_type": {
+      "value": 7,
+      "evidence": [
+        "website_summary: validated internal platforms … under GxP constraints"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "geography": {
+      "value": 10,
+      "evidence": [
+        "hq_country: United States",
+        "hq_state: New Jersey"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "revenue_range": {
+      "value": 0,
+      "evidence": [
+        "revenue_estimate_usd: 64000000000",
+        "revenue_source: Apollo"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "activation_state": {
+      "value": "Stable",
+      "evidence": [
+        "news_last_12mo: 2026-02-14 — data science hub expansion"
+      ],
+      "confidence": "medium",
+      "missing_inputs": []
+    },
+    "buying_signal": {
+      "value": 3,
+      "evidence": [
+        "eng_roles_open_60d_plus: 11"
+      ],
+      "confidence": "medium",
+      "missing_inputs": []
+    }
+  }
+}

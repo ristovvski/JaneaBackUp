@@ -1,0 +1,99 @@
+{
+  "event": "icp.scored",
+  "event_id": "clay-evt-malformed01",
+  "request_id": "req-icp-0006",
+  "emitted_at": "2026-09-09T10:15:00Z",
+  "model_version": "v5",
+  "org_id": "10001",
+  "deal_id": "55001",
+  "identifier_kind": "domain",
+  "identifier_value": "akuvo.com",
+  "components": {
+    "industry_vertical": {
+      "value": "FinTech",
+      "evidence": [
+        "li_industry: Financial Services",
+        "website_summary: lending and collections platform for credit unions"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "stage_maturity": {
+      "value": 10,
+      "evidence": [
+        "funding_stage: Series B",
+        "eng_roles_open_60d_plus: 4"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "company_type": {
+      "value": 10,
+      "evidence": [
+        "li_description: SaaS lending origination platform"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "revenue_range": {
+      "value": 7,
+      "evidence": [
+        "revenue_estimate_usd: 18000000",
+        "revenue_source: Apollo"
+      ],
+      "confidence": "medium",
+      "missing_inputs": []
+    },
+    "activation_state": {
+      "value": "Accelerating",
+      "evidence": [
+        "last_round_date: 2026-04-02",
+        "open_eng_roles_count: 11"
+      ],
+      "confidence": "high",
+      "missing_inputs": [],
+      "evidence_dated_within_months": 5
+    },
+    "buying_signal": {
+      "value": 7,
+      "evidence": [
+        "senior_eng_roles: 2",
+        "last_round_usd: 21000000"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    }
+  },
+  "score": {
+    "model_version": "v5",
+    "industry_level": 10,
+    "industry_tier": "Anchor",
+    "levels_used": {
+      "industry": 10,
+      "stage_maturity": 10,
+      "company_type": 10,
+      "geography": 10,
+      "revenue_range": 7,
+      "buying_signal": 7
+    },
+    "buying_signal_level": 7,
+    "composite": 92.5,
+    "activation_state_used": "Accelerating",
+    "multiplier": 0.5,
+    "final_score": 105,
+    "final_score_without_activation": 93,
+    "grade": "A",
+    "status": "insufficient_data",
+    "confidence_overall": "medium",
+    "tier2_candidate": false,
+    "flags": []
+  },
+  "facts_summary": {
+    "revenue_usd": 18000000,
+    "headcount_total": 190,
+    "headcount_eng": 62
+  },
+  "clay_table": "ICP_Engine",
+  "clay_row_url": null,
+  "unexpected_key": "this should fail additionalProperties"
+}
