@@ -68,6 +68,28 @@ export const PUBLIC_SUFFIXES = new Set([
   'com.bd', 'com.pk', 'net.pk', 'org.pk', 'gov.pk', 'edu.pk', 'com.mm',
 ]);
 
+// ---------------------------------------------------------------------------
+// Hosts that are never a company's own domain.
+//
+// Phase 0 (reports/coverage.md) found 2.4% of organizations with a LinkedIn
+// company URL typed into the native `website` field. Reduced as a domain, every
+// one of them becomes `linkedin.com` — so Clay would enrich LinkedIn
+// Corporation and the org would get a confident, completely wrong score. That
+// is worse than no identifier at all, so these hosts are refused as domain
+// identifiers.
+// ---------------------------------------------------------------------------
+export const NON_COMPANY_HOSTS = new Set([
+  'linkedin.com', 'facebook.com', 'fb.com', 'twitter.com', 'x.com',
+  'instagram.com', 'threads.net', 'tiktok.com', 'youtube.com', 'youtu.be',
+  'crunchbase.com', 'wikipedia.org', 'github.com', 'gitlab.com', 'medium.com',
+  'substack.com', 'notion.site', 'google.com', 'sites.google.com',
+  'docs.google.com', 'drive.google.com', 'wordpress.com', 'blogspot.com',
+  'wixsite.com', 'wix.com', 'squarespace.com', 'weebly.com', 'webflow.io',
+  'godaddysites.com', 'bit.ly', 'lnkd.in', 'calendly.com', 'angel.co',
+  'glassdoor.com', 'indeed.com', 'zoominfo.com', 'apollo.io', 'owler.com',
+  'bloomberg.com', 'reuters.com', 'pitchbook.com', 'example.com',
+]);
+
 const LEGAL_SUFFIX_TOKENS = new Set([
   'inc', 'incorporated', 'llc', 'lc', 'ltd', 'limited', 'gmbh', 'corp',
   'corporation', 'co', 'company', 'plc', 'sas', 'sa', 'sarl', 'bv', 'nv', 'ag',
@@ -211,25 +233,85 @@ export function normalizeCompanyName(input) {
 
 /**
  * Pick the identifier Clay should enrich from, in priority order:
- * domain (high) > LinkedIn company URL (high) > company name (low).
+ * domain (high) > native LinkedIn company URL (high) > a LinkedIn company URL
+ * recovered from the website field (LOW) > company name (low).
  *
- * NEEDS_DECISION #5 default: an org with neither domain nor LinkedIn is still
+ * The third case is the one Phase 0 forced. 2.4% of organizations hold a
+ * LinkedIn company URL in the native `website` field, and in the sampled rows
+ * the slug frequently names a DIFFERENT company than the organization record
+ * ("Massachusetts Biotechnology Council" -> /company/concertai). So a URL
+ * recovered from the wrong field is usable but not trustworthy: it comes back
+ * at low confidence with a warning, never at high confidence, and never as a
+ * domain.
+ *
+ * NEEDS_DECISION #5 default: an org with no usable identifier at all is still
  * scored, from name + HQ, at low confidence. It is never "Insufficient data"
  * on the strength of a missing identifier alone.
  *
- * @returns {{kind:'domain'|'linkedin'|'name', value:string, confidence:'high'|'low'}|null}
+ * @returns {{kind:'domain'|'linkedin'|'name', value:string,
+ *            confidence:'high'|'low', warnings:string[]}|null}
  */
 export function resolveIdentifier(org) {
   if (!org || typeof org !== 'object') return null;
 
-  const domain = normalizeDomain(org.website || org.domain || null);
-  if (domain) return { kind: 'domain', value: domain, confidence: 'high' };
+  const warnings = [];
+  const rawWebsite = org.website || org.domain || null;
+  const rawLinkedin = org.linkedin || org.linkedin_url || null;
 
-  const linkedin = normalizeLinkedInCompanyUrl(org.linkedin || org.linkedin_url || null);
-  if (linkedin) return { kind: 'linkedin', value: linkedin, confidence: 'high' };
+  // 1. A real company domain in the website field.
+  const websiteDomain = normalizeDomain(rawWebsite);
+  const websiteAsLinkedIn = normalizeLinkedInCompanyUrl(rawWebsite);
 
+  if (websiteDomain && !websiteAsLinkedIn && !NON_COMPANY_HOSTS.has(websiteDomain)) {
+    return { kind: 'domain', value: websiteDomain, confidence: 'high', warnings };
+  }
+
+  if (websiteDomain && NON_COMPANY_HOSTS.has(websiteDomain) && !websiteAsLinkedIn) {
+    warnings.push(`website_is_not_a_company_domain:${websiteDomain}`);
+  }
+
+  // 2. The native LinkedIn field, which is the field a human meant to fill.
+  const nativeLinkedIn = normalizeLinkedInCompanyUrl(rawLinkedin);
+  if (nativeLinkedIn) {
+    return { kind: 'linkedin', value: nativeLinkedIn, confidence: 'high', warnings };
+  }
+  if (rawLinkedin && !nativeLinkedIn) {
+    warnings.push('linkedin_field_is_not_a_company_url');
+  }
+
+  // 3. A LinkedIn company URL recovered from the website field. Usable, but
+  //    demonstrably unreliable — see the doc comment.
+  if (websiteAsLinkedIn) {
+    warnings.push('linkedin_url_recovered_from_website_field');
+    const slug = websiteAsLinkedIn.split('/').pop();
+    const name = normalizeCompanyName(org.name || org.company_name || null);
+    if (name && !slugPlausiblyMatches(slug, name)) {
+      warnings.push(`linkedin_slug_does_not_match_org_name:${slug}`);
+    }
+    return { kind: 'linkedin', value: websiteAsLinkedIn, confidence: 'low', warnings };
+  }
+
+  // 4. Name only.
   const name = normalizeCompanyName(org.name || org.company_name || null);
-  if (name) return { kind: 'name', value: name, confidence: 'low' };
+  if (name) return { kind: 'name', value: name, confidence: 'low', warnings };
 
   return null;
+}
+
+/**
+ * Does a LinkedIn slug look like it belongs to this company?
+ *
+ * Deliberately loose: it exists to catch "Massachusetts Biotechnology Council"
+ * vs `concertai`, not to adjudicate close calls. A false "matches" is fine; a
+ * false "does not match" only adds a warning, never drops the identifier.
+ */
+export function slugPlausiblyMatches(slug, normalizedName) {
+  if (!slug || !normalizedName) return true;
+  const flat = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const a = flat(slug);
+  const b = flat(normalizedName);
+  if (a === '' || b === '') return true;
+  if (a.includes(b) || b.includes(a)) return true;
+  // Any name token of 4+ characters appearing in the slug counts as a match.
+  return normalizedName.split(' ').some((token) => token.length >= 4 && a.includes(flat(token)));
 }

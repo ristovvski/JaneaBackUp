@@ -11,7 +11,9 @@ import {
   normalizeLinkedInCompanyUrl,
   normalizeCompanyName,
   resolveIdentifier,
+  slugPlausiblyMatches,
   PUBLIC_SUFFIXES,
+  NON_COMPANY_HOSTS,
 } from '../../engine/normalize.mjs';
 
 // --------------------------------------------------------------------------
@@ -218,32 +220,35 @@ describe('resolveIdentifier', () => {
         website: 'https://www.acme.io/about',
         linkedin: 'https://www.linkedin.com/company/acme',
       }),
-      { kind: 'domain', value: 'acme.io', confidence: 'high' }
+      { kind: 'domain', value: 'acme.io', confidence: 'high', warnings: [] }
     );
   });
 
-  test('no website -> LinkedIn, at high confidence', () => {
+  test('no website -> native LinkedIn, at high confidence', () => {
     assert.deepEqual(
       resolveIdentifier({ name: 'Acme, Inc.', website: null, linkedin: 'linkedin.com/company/Acme/' }),
-      { kind: 'linkedin', value: 'https://www.linkedin.com/company/acme', confidence: 'high' }
+      { kind: 'linkedin', value: 'https://www.linkedin.com/company/acme', confidence: 'high', warnings: [] }
     );
   });
 
   test('name only -> name, at LOW confidence (NEEDS_DECISION #5 default)', () => {
     assert.deepEqual(
       resolveIdentifier({ name: 'Acme, Inc.' }),
-      { kind: 'name', value: 'acme', confidence: 'low' }
+      { kind: 'name', value: 'acme', confidence: 'low', warnings: [] }
     );
   });
 
   test('an unusable website falls through to LinkedIn rather than failing', () => {
     const out = resolveIdentifier({ name: 'Acme', website: 'n/a', linkedin: 'linkedin.com/company/acme' });
     assert.equal(out.kind, 'linkedin');
+    assert.equal(out.confidence, 'high');
   });
 
   test('a people LinkedIn URL is not an identifier and falls through to name', () => {
     const out = resolveIdentifier({ name: 'Acme Inc', linkedin: 'https://www.linkedin.com/in/pii-60c32bf3' });
-    assert.deepEqual(out, { kind: 'name', value: 'acme', confidence: 'low' });
+    assert.equal(out.kind, 'name');
+    assert.equal(out.value, 'acme');
+    assert.ok(out.warnings.includes('linkedin_field_is_not_a_company_url'));
   });
 
   test('the alternate field spellings are accepted', () => {
@@ -258,14 +263,120 @@ describe('resolveIdentifier', () => {
     assert.equal(resolveIdentifier(null), null);
   });
 
-  test('only domain and linkedin are ever high confidence', () => {
+  test('every result carries a warnings array', () => {
     for (const org of [
-      { website: 'acme.io' },
-      { linkedin: 'linkedin.com/company/acme' },
-      { name: 'Acme' },
+      { website: 'acme.io' }, { linkedin: 'linkedin.com/company/acme' }, { name: 'Acme' },
     ]) {
-      const out = resolveIdentifier(org);
-      assert.equal(out.confidence, out.kind === 'name' ? 'low' : 'high');
+      assert.ok(Array.isArray(resolveIdentifier(org).warnings));
     }
+  });
+});
+
+// --------------------------------------------------------------------------
+// The Phase 0 defects. reports/coverage.md found 2.4% of organizations with a
+// LinkedIn company URL in the native `website` field, frequently naming a
+// DIFFERENT company. Reduced naively, every one becomes `linkedin.com` and
+// Clay enriches LinkedIn Corporation. These tests are that bug's tombstone.
+// --------------------------------------------------------------------------
+describe('resolveIdentifier — Phase 0 data defects', () => {
+  test('a LinkedIn company URL in the website field is NEVER returned as a domain', () => {
+    const out = resolveIdentifier({
+      name: 'Massachusetts Biotechnology Council',
+      website: 'https://www.linkedin.com/company/concertai',
+    });
+    assert.notEqual(out.kind, 'domain');
+    assert.notEqual(out.value, 'linkedin.com');
+  });
+
+  test('it comes back as linkedin at LOW confidence, with a warning', () => {
+    const out = resolveIdentifier({ name: 'Vertice AI', website: 'https://www.linkedin.com/company/verticeai' });
+    assert.equal(out.kind, 'linkedin');
+    assert.equal(out.value, 'https://www.linkedin.com/company/verticeai');
+    assert.equal(out.confidence, 'low', 'recovered from the wrong field, so not trustworthy');
+    assert.ok(out.warnings.includes('linkedin_url_recovered_from_website_field'));
+  });
+
+  test('a slug naming a different company is flagged', () => {
+    const out = resolveIdentifier({
+      name: 'Massachusetts Biotechnology Council',
+      website: 'https://www.linkedin.com/company/concertai',
+    });
+    assert.ok(out.warnings.some((w) => w.startsWith('linkedin_slug_does_not_match_org_name:')));
+  });
+
+  test('a slug that does match is not flagged', () => {
+    for (const [name, slug] of [
+      ['Vertice AI', 'verticeai'],
+      ['CapeStart, Inc', 'cape-start'],
+      ['Akuvo', 'akuvo'],
+      ['QCash Financial LLC', 'qcash-financial'],
+    ]) {
+      const out = resolveIdentifier({ name, website: `https://www.linkedin.com/company/${slug}` });
+      assert.ok(
+        !out.warnings.some((w) => w.startsWith('linkedin_slug_does_not_match_org_name')),
+        `${name} / ${slug} should be treated as a plausible match`
+      );
+    }
+  });
+
+  test('the native linkedin field beats one recovered from the website field', () => {
+    const out = resolveIdentifier({
+      name: 'Massachusetts Biotechnology Council',
+      website: 'https://www.linkedin.com/company/concertai',
+      linkedin: 'https://www.linkedin.com/company/massbio',
+    });
+    assert.equal(out.value, 'https://www.linkedin.com/company/massbio');
+    assert.equal(out.confidence, 'high');
+  });
+
+  test('every non-company host is refused as a domain identifier', () => {
+    for (const host of NON_COMPANY_HOSTS) {
+      const out = resolveIdentifier({ name: 'Acme Systems', website: `https://${host}/acme` });
+      assert.notEqual(out.kind, 'domain', `${host} must not be a domain identifier`);
+      assert.notEqual(out.value, host);
+    }
+  });
+
+  test('a non-company host falls through to name and says why', () => {
+    const out = resolveIdentifier({ name: 'Acme Systems', website: 'https://crunchbase.com/organization/acme' });
+    assert.deepEqual(out, {
+      kind: 'name',
+      value: 'acme systems',
+      confidence: 'low',
+      warnings: ['website_is_not_a_company_domain:crunchbase.com'],
+    });
+  });
+
+  test('a subdomain of a non-company host is refused too', () => {
+    const out = resolveIdentifier({ name: 'Acme', website: 'https://acme.wixsite.com/home' });
+    assert.notEqual(out.kind, 'domain');
+  });
+
+  test('a real company domain is unaffected by any of this', () => {
+    for (const website of [
+      'https://akuvo.com', 'invoicecloud.com', 'https://www.alloyacorp.org/about',
+      'https://lumamdx.com/', 'http://qcash.io',
+    ]) {
+      const out = resolveIdentifier({ name: 'Whatever', website });
+      assert.equal(out.kind, 'domain', website);
+      assert.equal(out.confidence, 'high');
+      assert.deepEqual(out.warnings, []);
+    }
+  });
+
+  test('slugPlausiblyMatches is loose on purpose and never throws', () => {
+    assert.equal(slugPlausiblyMatches('akuvo', 'akuvo'), true);
+    assert.equal(slugPlausiblyMatches('cape-start', 'capestart'), true);
+    assert.equal(slugPlausiblyMatches('concertai', 'massachusetts biotechnology council'), false);
+    // Degenerate inputs default to "matches", so a warning is never invented.
+    assert.equal(slugPlausiblyMatches(null, 'acme'), true);
+    assert.equal(slugPlausiblyMatches('acme', null), true);
+    assert.equal(slugPlausiblyMatches('', ''), true);
+  });
+
+  test('short name tokens do not create a false match', () => {
+    // "ai" is 2 characters, below the 4-character token floor, so "Vertice AI"
+    // must not match an unrelated slug just because both contain "ai".
+    assert.equal(slugPlausiblyMatches('openai', 'vertice ai'), false);
   });
 });
