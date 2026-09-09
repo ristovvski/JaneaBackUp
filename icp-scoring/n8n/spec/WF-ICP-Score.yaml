@@ -1,0 +1,191 @@
+# WF-ICP-Score — factory DSL spec
+#
+# Stage: /spec. No n8n JSON at this stage.
+# Reviewed against references/checklists.md; findings in n8n/spec/REVIEW.md.
+# Build (/build-dev) waits on Nik's sign-off of that review.
+
+workflow_name: WF-ICP-Score
+goal: >-
+  Score the Organization of every newly created Pipedrive deal with the ICP v5
+  rubric via Clay, and write five Calculated fields, one explanatory note and
+  one audit row - idempotently, so a replay or a re-run changes nothing.
+
+trigger:
+  type: webhook
+  event: pipedrive.deal.added      # Pipedrive webhook v2, entity=deal, action=create
+  second_webhook: clay.icp.scored  # Clay posts back; separate path, header auth
+  notes:
+    - >-
+      "deal.added" is the build task's name for it. The Pipedrive API has no
+      "added" action: this is event_action=create on event_object=deal.
+      Verified against developers.pipedrive.com/docs/api/v1/Webhooks.
+    - >-
+      Two webhook nodes in one workflow, not two workflows. Path B needs the
+      same CONFIG, the same dedupe ledger and the same field keys as Path A,
+      and $getWorkflowStaticData is workflow-scoped - splitting them would
+      need an external ledger for no benefit.
+
+providers:
+  crm: pipedrive
+  enrichment: clay
+  slack_channel: "#gtm-ops"        # DEV: #gtm-ops-dev, from CONFIG
+  audit: google_sheets
+
+input_contract: crm.deal -> crm.organization
+
+assumptions:
+  - >-
+    Org custom fields created by scripts/pipedrive_create_fields.mjs; keys and
+    enum option ids in config/pipedrive_fields.json. CONFIG is generated from
+    that file (npm run gen:config), so no key is ever typed into a node.
+  - >-
+    Clay ICP_Engine webhook URL and secret reach CONFIG through n8n credentials
+    and environment placeholders, never as literals in the exported JSON.
+  - >-
+    Google Sheet ICP_Audit exists with the header row BuildAuditRow emits
+    (31 columns, §8.4). NEEDS_DECISION #7 if another store is preferred - the
+    node is one append call behind a CONFIG-held sheet id.
+  - >-
+    WF-ERR (the existing error workflow) is reachable in the DEV project and is
+    set as settings.errorWorkflow.
+  - >-
+    Phase 0 measured that only 19.6% of organizations yield a usable root
+    domain and 76.8% have neither domain nor LinkedIn URL. The workflow is
+    built for that reality: a name-only identifier is normal, not exceptional.
+
+modules:
+  - CORE__ValidatePayload__v1
+  - CORE__ErrorHandler          # existing WF-ERR, via settings.errorWorkflow
+  - PIPEDRIVE__GetOrganization
+  - PIPEDRIVE__UpdateOrganization
+  - PIPEDRIVE__CreateNote
+  - SLACK__NotifyOps__v1
+
+module_notes:
+  - >-
+    Single-provider CONFIG-centralization, per the golden example: direct
+    Pipedrive calls with every provider-specific id in one CONFIG node, rather
+    than adapter subworkflows. A second CRM would earn the adapters; one does
+    not.
+
+field_mappings:
+  # Symbolic name -> registry slug in config/pipedrive_fields.json.
+  # CONFIG resolves each slug to its 40-hex key. Nothing below is a literal.
+  ICP Calculated:    icp_calculated      # enum, written by option id
+  ICP Score:         icp_score           # double, 0-100
+  ICP Scored At:     icp_scored_at       # date, drives the 180-day gate
+  ICP Model Version: icp_model_version   # varchar
+  ICP Final:         icp_final           # HUMAN-OWNED: never read, never written
+
+business_rules:
+  - Trigger only on deal create; ignore deal update and delete.
+  - >-
+    Skip when the org has ICP Calculated AND model_version == v5 AND scored_at
+    is less than 180 days old (the idempotency gate). Any one of the three
+    failing means re-score.
+  - Never write ICP Final; never read it as scoring input.
+  - >-
+    Write ICP Calculated / Score / Scored At / Model Version only when the
+    value differs from what the org already holds (no churn). An unchanged
+    value produces an empty patch and the IF gate skips the PATCH entirely.
+  - >-
+    insufficient_data -> ICP Calculated = "Insufficient data", ICP Score left
+    empty, and the note's Missing line is mandatory and non-empty.
+  - >-
+    Any error -> ICP Calculated = "Error", a note carrying the reason, and a
+    Slack alert carrying execution_id and request_id.
+  - >-
+    Contracting always shows the "without activation" score in the note, so a
+    zeroed score is legible rather than mysterious.
+  - >-
+    A Tier 2 candidate says so in the note. It does not change the grade -
+    the composite already gates those accounts out.
+
+idempotency:
+  path_a_key: "pipedrive:deal:{deal_id}:{event_id}"
+  path_b_key: "clay:scored:{request_id}:{event_id}"
+  ledger: $getWorkflowStaticData('global'), TTL 48h, pruned on every run
+  org_level_gate: the 180-day / model-version skip above
+  write_gates: every patch builder returns {} when nothing differs
+  notes:
+    - >-
+      Three independent layers, because they fail differently. The ledger stops
+      a duplicate DELIVERY. The org gate stops a duplicate SCORING RUN. The
+      write gates stop a duplicate WRITE. Removing any one leaves a real hole:
+      the ledger is memory-only and does not survive a restart, and the org
+      gate cannot see a second delivery of the same event within the window.
+    - >-
+      event_id comes from meta.id, the id of the triggering event. It must NOT
+      include meta.attempt: Pipedrive increments attempt on retry, and a key
+      containing it would treat every retry as a new event.
+
+rate_limits:
+  pipedrive: token_budget_aware_backoff   # 429 -> honour retry-after
+  clay: n/a (async; Clay answers on Path B)
+  anthropic: n/a (classifier calls are Clay-side)
+
+error_policy:
+  terminal_errors_route_to: CORE__ErrorHandler   # settings.errorWorkflow = WF-ERR
+  notify: slack
+  on_error_side_effects:
+    - BuildErrorPatch -> PATCH ICP Calculated = "Error" (idempotent)
+    - note carrying the reason and the request_id
+    - Slack alert carrying execution_id and request_id
+  notes:
+    - >-
+      A malformed Clay event is a typed error thrown in ParseScored, not a
+      silent skip. Silence here would leave the org permanently unscored with
+      nothing to look at.
+
+observability:
+  correlation_id: required (request_id, minted on Path A, echoed by Clay)
+  slack_summary: per_error_only
+  audit_row: every Path B run, including duplicates (flagged `duplicate`)
+  notes:
+    - >-
+      The audit row is written even for a dropped duplicate. A dedupe that
+      leaves no trace is indistinguishable from a lost event when someone asks
+      why an org was not scored.
+
+security:
+  - No secret in any node parameter, Code node or exported JSON.
+  - Credentials by n8n credential name only: pipedrive_main, clay_webhook_secret, slack_ops, gsheets_audit.
+  - Webhook A - Pipedrive HTTP basic auth (http_auth_user / http_auth_password on the subscription).
+  - Webhook B - header auth, X-Clay-Secret.
+  - active false in every exported workflow JSON. DEV project only.
+
+graph:
+  path_a: >-
+    Webhook(pipedrive) -> Respond 200 -> CONFIG -> Dedupe -> Normalize ->
+    IF deal.create? -> GetOrganization -> IdempotencyGate(IF fresh score?)
+    -> yes -> NoOp
+    -> no  -> BuildClayRequest -> HTTP POST Clay -> (end; async)
+  path_b: >-
+    Webhook(clay, header auth) -> Respond 200 -> CONFIG -> Dedupe ->
+    ParseScored(schema) -> invalid -> ErrorPatch + Note + Slack
+    -> GetOrganization -> BuildOrgPatch -> IF patch non-empty? -> PATCH org
+    -> BuildNote -> POST note -> BuildAuditRow -> Append sheet row
+  node_rules:
+    - One CONFIG Set node first on each path; every field key, option id, channel id, Clay URL, model version and the 180-day window lives there.
+    - Normalize is the only node that reads a raw body.
+    - Code-built request bodies (IIFE, omit-null). No inline field-in-JSON templates.
+    - retryOnFail false on POST note (a retried create is a duplicate note).
+    - GET and PATCH may retry with backoff.
+    - Enum fields written by option id, never by label.
+    - Slack alerts reference execution_id and request_id.
+
+test_cases:
+  unit:        S1-S12 (§5) plus the normalize table (§6) - 188 tests
+  contract:    fixtures against all three schemas; prompts embed the rubric text; Clay/engine parity
+  static:      workflow JSON lint (§9.3) - active false, no pinData, no literal ids, no secrets, retry semantics, Code-node byte-identity
+  node_exec:   the 15 cases in §9.4, executing the real Code-node sources
+  golden:      Akuvo A; Microsoft and Merck not A; agreement over graded accounts
+  live_dev:    the 6 steps in §9.7, asserting execution truth via the n8n executions API
+
+out_of_scope:
+  - Slack /icp command, approve/override buttons, manual calculator modal.
+  - Dedup and org creation (the trigger fires on an existing org).
+  - Clay-side campaign scoring (Melisa's path).
+  - Production deploy. /publish is human-gated.
+
+deployment_target: dev

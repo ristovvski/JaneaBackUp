@@ -21,7 +21,9 @@
     "pipedrive:webhook": "node scripts/pipedrive_register_webhook.mjs",
     "golden:export": "node scripts/export_golden_set.mjs",
     "patch": "node n8n/patch/patch.mjs",
-    "gen:prompts": "node scripts/gen_prompts.mjs"
+    "gen:prompts": "node scripts/gen_prompts.mjs",
+    "check:nodes": "node scripts/check_nodes.mjs",
+    "gen:nodes": "node scripts/gen_nodes.mjs"
   },
   "dependencies": {
     "ajv": "^8.17.1",

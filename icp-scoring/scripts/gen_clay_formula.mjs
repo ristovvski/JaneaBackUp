@@ -10,7 +10,7 @@
 // Run: npm run gen:formula   (the contract test fails if the file is stale)
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -298,5 +298,13 @@ from the seven classifier outputs and ignore Clay's score_json entirely. That
 switch is a one-line CONFIG flag (score_source: clay | n8n), not a rebuild.
 `;
 
-writeFileSync(join(ROOT, 'engine', 'clay_formula.txt'), file, 'utf8');
-process.stdout.write(`wrote engine/clay_formula.txt (${file.length} bytes)\n`);
+export const FORMULA_FILE = file;
+
+// Write ONLY when run directly. Importing this module (the parity test needs
+// BEGIN and END from it) must not refresh the file it is about to check for
+// staleness — otherwise the staleness assertion can never fail.
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  writeFileSync(join(ROOT, 'engine', 'clay_formula.txt'), file, 'utf8');
+  process.stdout.write(`wrote engine/clay_formula.txt (${file.length} bytes)\n`);
+}

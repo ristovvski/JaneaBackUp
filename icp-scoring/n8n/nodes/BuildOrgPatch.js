@@ -1,0 +1,126 @@
+// BuildOrgPatch — the Pipedrive organization PATCH body, or {} when nothing
+// differs.
+//
+// Organizations are v2, so custom fields nest under `custom_fields` keyed by
+// the 40-hex field key (leads are v1 with TOP-LEVEL hashed keys — different
+// object, different shape; do not copy one to the other).
+//
+// Two invariants live here:
+//
+//   1. ICP Final is NEVER written. It is the human's field. The key is in
+//      CONFIG.fields_never_write and this node asserts against it rather than
+//      merely omitting it, so a future edit that adds it fails loudly.
+//
+//   2. No churn. A key is included only when its value actually differs from
+//      what the org already holds. Same event, same values -> {} -> the IF
+//      gate skips the PATCH entirely, and Pipedrive sees no write at all.
+//
+// On ICP Scored At: it is included when the date differs, which means a
+// re-score on a later day updates it (correct — it is what the 180-day gate
+// reads) while a second run on the same day writes nothing (also correct).
+
+const cfg = $('CONFIG').item.json;
+const parsed = $('ParseScored').item.json;
+const fetched = $input.first().json;
+const org = fetched.data || fetched;
+const existing = org.custom_fields || {};
+
+const score = parsed.score;
+
+// ---------------------------------------------------------------------------
+// What should ICP Calculated say?
+// ---------------------------------------------------------------------------
+let targetLabel;
+if (score.status === 'insufficient_data') {
+  targetLabel = cfg.label_insufficient;
+} else {
+  targetLabel = cfg.grade_labels[score.grade];
+}
+
+if (!targetLabel) {
+  const error = new Error(
+    `ICP_UNMAPPED_GRADE: no label for grade ${JSON.stringify(score.grade)} ` +
+    `with status ${JSON.stringify(score.status)}`
+  );
+  error.name = 'IcpUnmappedGrade';
+  throw error;
+}
+
+// Enums are written by OPTION ID, never by label.
+const optionId = cfg.opt_icp_calculated[targetLabel];
+if (optionId === null || optionId === undefined) {
+  const error = new Error(
+    `ICP_MISSING_OPTION_ID: "${targetLabel}" has no option id in CONFIG. ` +
+    `Run scripts/pipedrive_create_fields.mjs against the live account and ` +
+    `npm run gen:config. Writing an enum by label is not supported.`
+  );
+  error.name = 'IcpMissingOptionId';
+  throw error;
+}
+
+// ---------------------------------------------------------------------------
+// The four target values.
+// ---------------------------------------------------------------------------
+const scoredAt = String(cfg.now_iso).slice(0, 10); // Pipedrive date = YYYY-MM-DD
+
+const targets = {};
+targets[cfg.f_icp_calculated] = optionId;
+targets[cfg.f_icp_scored_at] = scoredAt;
+targets[cfg.f_icp_model_version] = cfg.model_version;
+// On insufficient_data the score must be ABSENT, not 0 and not "". Pipedrive
+// clears a field with null, so null is the target rather than an omission —
+// otherwise a previous numeric score would survive under an
+// "Insufficient data" label, which reads as a score of the wrong kind.
+targets[cfg.f_icp_score] = score.status === 'insufficient_data' ? null : score.final_score;
+
+// ---------------------------------------------------------------------------
+// Include only what differs.
+// ---------------------------------------------------------------------------
+const same = (a, b) => {
+  if (a === null || a === undefined) return b === null || b === undefined;
+  if (b === null || b === undefined) return false;
+  if (typeof a === 'number' || typeof b === 'number') return Number(a) === Number(b);
+  return String(a) === String(b);
+};
+
+const customFields = {};
+const changed = [];
+const unchanged = [];
+
+for (const key of Object.keys(targets)) {
+  if (same(existing[key], targets[key])) {
+    unchanged.push(key);
+  } else {
+    customFields[key] = targets[key];
+    changed.push(key);
+  }
+}
+
+// Invariant 2: assert, do not merely omit.
+for (const forbidden of cfg.fields_never_write || []) {
+  if (Object.prototype.hasOwnProperty.call(customFields, forbidden)) {
+    const error = new Error(
+      `ICP_FORBIDDEN_WRITE: the patch contains ${forbidden}, which is in ` +
+      `CONFIG.fields_never_write (ICP Final is the human's field)`
+    );
+    error.name = 'IcpForbiddenWrite';
+    throw error;
+  }
+}
+
+const patch = changed.length === 0 ? {} : { custom_fields: customFields };
+
+return [{
+  json: {
+    request_id: parsed.request_id,
+    org_id: parsed.org_id,
+    deal_id: parsed.deal_id,
+    patch,
+    patch_is_empty: changed.length === 0,
+    changed_fields: changed,
+    unchanged_fields: unchanged,
+    target_label: targetLabel,
+    target_option_id: optionId,
+    scored_at: scoredAt,
+  },
+}];
