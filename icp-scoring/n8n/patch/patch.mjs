@@ -19,7 +19,7 @@
 //   node n8n/patch/patch.mjs            build + validate
 //   node n8n/patch/patch.mjs --check    validate only; fail if a rebuild would differ
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { validate } from './validate.mjs';
@@ -550,6 +550,11 @@ if (isMain) {
   }
 
   const importPayload = emit(stripCredentials(workflow));
+
+  // n8n/workflows/ holds only gitignored build output, so git does not carry
+  // the directory and a fresh clone does not have it. Create it rather than
+  // requiring a manual mkdir — this is what the fresh-clone check caught.
+  mkdirSync(dirname(OUT), { recursive: true });
 
   writeFileSync(OUT, text, 'utf8');
   writeFileSync(API_OUT, apiPayload, 'utf8');
