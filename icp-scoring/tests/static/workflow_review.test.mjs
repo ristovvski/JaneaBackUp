@@ -434,6 +434,16 @@ describe('ICP Final is never written', () => {
     }
   });
 
+  test('the NOTE_WATCHDOG marker for NEEDS_DECISION #2 is where the runbook says', () => {
+    // §11 #2 default is the honor system, with a marker left at the exact
+    // place a change.organization watchdog would attach. RUNBOOK.md points a
+    // reader here, so the marker has to stay findable.
+    const source = readFileSync(join(NODES_DIR, 'BuildOrgPatch.js'), 'utf8');
+    assert.ok(source.includes('NOTE_WATCHDOG'), 'the marker must be in BuildOrgPatch.js');
+    assert.match(source, /NEEDS_DECISION #2/);
+    assert.match(source, /change\.organization/, 'and must name the webhook that would attach');
+  });
+
   test('ICP Final is not read as scoring input anywhere', () => {
     for (const node of wf.nodes) {
       const params = nodeParams(node);

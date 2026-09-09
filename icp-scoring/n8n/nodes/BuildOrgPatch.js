@@ -18,6 +18,24 @@
 // On ICP Scored At: it is included when the date differs, which means a
 // re-score on a later day updates it (correct — it is what the 180-day gate
 // reads) while a second run on the same day writes nothing (also correct).
+//
+// NOTE_WATCHDOG (NEEDS_DECISION #2 — honor system is the implemented default)
+// -------------------------------------------------------------------------
+// Nothing stops a rep overwriting ICP Calculated by hand, and the next
+// re-score silently reverts it, up to 180 days later. The chosen default is
+// the honor system: ICP Calculated belongs to the system, ICP Final belongs to
+// the human, and the system never touches ICP Final.
+//
+// If the honor system does not hold, THIS is where the watchdog attaches: a
+// second Pipedrive webhook on change.organization, filtered to
+// CONFIG.f_icp_calculated, comparing meta.change_source. An 'app' change to
+// that field with no matching execution in the ledger is a human edit, and the
+// watchdog would post one Slack notice naming the org, the old value and the
+// new one. It would NOT revert the edit — reverting a human's deliberate change
+// without asking is worse than the drift it fixes.
+//
+// Deliberately a comment and not disabled code: an unused branch rots, and the
+// decision is Nik's to make, not this node's to pre-empt.
 
 const cfg = $('CONFIG').item.json;
 const parsed = $('ParseScored').item.json;
