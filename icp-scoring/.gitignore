@@ -47,6 +47,8 @@ n8n/workflows/*.json
 # business being in git. config/pipedrive_fields.json stays the placeholder
 # template; a live create_fields run writes the .local.json beside it.
 config/pipedrive_fields.local.json
+# ...and the CONFIG rendered from it, which inlines those keys.
+n8n/nodes/CONFIG.local.json
 
 # ---------------------------------------------------------------------------
 # allow-list: the JSON sources this subtree cannot work without

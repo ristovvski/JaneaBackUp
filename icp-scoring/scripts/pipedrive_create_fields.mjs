@@ -11,15 +11,28 @@
 //   PIPEDRIVE_API_TOKEN=... npm run pipedrive:fields
 //   PIPEDRIVE_API_TOKEN=... node scripts/pipedrive_create_fields.mjs --dry-run
 //
-// API evidence (developers.pipedrive.com, Organization Fields):
+// API evidence (developers.pipedrive.com, Organization Fields) plus a live
+// read of the account on 2026-09-09:
+//
 //   POST /api/v2/organizationFields  body: { field_name, field_type, options }
 //   field_type: varchar | text | double | date | enum | set | ...
 //   options for enum/set: [{ "label": "..." }]
 //   GET  /api/v2/organizationFields  params: limit (max 500), cursor
 //
-// The option-id shape of the response is NOT documented. Writing an enum by
-// option id (§8.2) requires it, so this script reads options[].id back and
-// FAILS LOUDLY with NEEDS_DOC_EVIDENCE rather than guessing if it is absent.
+// The v2 field object is NOT the v1 one, and the difference is a trap this
+// script fell into once. v2 returns:
+//     field_name, field_code, field_type, options, subfields,
+//     is_custom_field, is_optional_response_field, is_writable
+// There is no `name`, no `key` and no `id`. Reading `field.name` returns
+// undefined for every field, so a name-matched idempotency check silently
+// matches NOTHING and every run creates a fresh duplicate set. The --dry-run
+// output that exposed this said "0 found, would create 5" against an account
+// that already had 55 fields.
+//
+// Option ids ARE returned, as options: [{ id, label }] — verified live, on both
+// v1 and v2. That closes the old NEEDS_DOC_EVIDENCE. The read-back below still
+// fails loudly if an id is missing, because writing an enum by label is not
+// something to fall back to silently.
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -76,6 +89,25 @@ async function api(method, path, body = null) {
   return text ? JSON.parse(text) : {};
 }
 
+/**
+ * Normalize a v2 (or v1) field object to one internal shape, so the rest of
+ * this script cannot care which spelling the API used.
+ */
+function normalizeField(raw) {
+  return {
+    name: raw.field_name !== undefined ? raw.field_name : raw.name,
+    key: raw.field_code !== undefined ? raw.field_code : raw.key,
+    field_type: raw.field_type,
+    options: Array.isArray(raw.options) ? raw.options : null,
+    is_custom: raw.is_custom_field !== undefined
+      ? raw.is_custom_field
+      : /^[0-9a-f]{40}$/.test(String(raw.key || '')),
+    is_writable: raw.is_writable !== false,
+    id: raw.id !== undefined ? raw.id : null,
+    raw,
+  };
+}
+
 async function listOrgFields() {
   const fields = [];
   let cursor = null;
@@ -83,9 +115,21 @@ async function listOrgFields() {
     const params = new URLSearchParams({ limit: '500' });
     if (cursor) params.set('cursor', cursor);
     const payload = await api('GET', `/api/v2/organizationFields?${params}`);
-    fields.push(...(payload.data || []));
+    fields.push(...(payload.data || []).map(normalizeField));
     cursor = payload.additional_data?.next_cursor || null;
   } while (cursor);
+
+  // Guard the trap above: if every name came back undefined we are reading the
+  // wrong property and MUST NOT proceed to create.
+  const named = fields.filter((f) => typeof f.name === 'string' && f.name !== '').length;
+  if (fields.length > 0 && named === 0) {
+    throw new Error(
+      `NEEDS_DOC_EVIDENCE: read ${fields.length} organization fields but resolved 0 names. ` +
+      `The API field shape changed; matching by name would match nothing and every run ` +
+      `would create duplicates. Refusing to create anything. ` +
+      `Keys seen on the first object: ${Object.keys(fields[0].raw).join(', ')}`
+    );
+  }
   return fields;
 }
 
@@ -95,7 +139,11 @@ const nameKey = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ')
 process.stderr.write('Reading the existing organization fields (read-only)...\n');
 const existing = await listOrgFields();
 const existingByName = new Map(existing.map((f) => [nameKey(f.name), f]));
-process.stderr.write(`  ${existing.length} organization fields in the account\n\n`);
+process.stderr.write(
+  `  ${existing.length} organization fields in the account ` +
+  `(${existing.filter((f) => f.is_custom).length} custom), ` +
+  `${existingByName.size} distinct names resolved\n\n`
+);
 
 const summary = { created: [], found: [], optionsAdded: [], problems: [] };
 
@@ -105,7 +153,13 @@ for (const [slug, spec] of Object.entries(registry.fields)) {
 
   if (field) {
     summary.found.push(wanted);
-    process.stderr.write(`FOUND    ${wanted} (key ${field.key}, type ${field.field_type})\n`);
+    process.stderr.write(`FOUND    ${wanted} (type ${field.field_type}, custom=${field.is_custom})\n`);
+    if (field.is_writable === false) {
+      summary.problems.push(
+        `"${wanted}" exists but the API reports it as not writable. The workflow cannot ` +
+        `write it; check the field's permissions in Pipedrive.`
+      );
+    }
     if (field.field_type !== spec.field_type) {
       summary.problems.push(
         `"${wanted}" exists with type "${field.field_type}" but the registry expects ` +
@@ -120,9 +174,16 @@ for (const [slug, spec] of Object.entries(registry.fields)) {
     const body = { field_name: wanted, field_type: spec.field_type };
     if (spec.options) body.options = Object.keys(spec.options).map((label) => ({ label }));
     const created = await api('POST', '/api/v2/organizationFields', body);
-    field = created.data;
+    field = normalizeField(created.data || {});
+    if (!field.key) {
+      throw new Error(
+        `NEEDS_DOC_EVIDENCE: created "${wanted}" but the response carried no field ` +
+        `code/key. The field EXISTS in Pipedrive now — re-run this script and it will ` +
+        `adopt it. Response keys: ${Object.keys(created.data || {}).join(', ')}`
+      );
+    }
     summary.created.push(wanted);
-    process.stderr.write(`CREATED  ${wanted} (key ${field.key}, type ${field.field_type})\n`);
+    process.stderr.write(`CREATED  ${wanted} (type ${field.field_type})\n`);
   }
 
   // --- resolve the key and, for enums, every option id --------------------

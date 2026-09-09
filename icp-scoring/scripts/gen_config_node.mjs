@@ -118,16 +118,35 @@ export function buildConfig() {
 
 export const CONFIG_PRETTY = `${JSON.stringify(buildConfig(), null, 2)}\n`;
 
+// Where the rendering goes depends on whether it carries real field keys.
+//
+//   template registry -> n8n/nodes/CONFIG.json        (committed, placeholders)
+//   live registry     -> n8n/nodes/CONFIG.local.json  (gitignored, real 40-hex keys)
+//
+// A real Pipedrive field key is not a credential, but it is an account
+// identifier and the owner's rule is that nothing key-shaped reaches git. The
+// patcher and the test harness both prefer the .local.json when it exists, so
+// a machine that has run create_fields builds the real workflow while a fresh
+// clone still builds and tests from the placeholders.
+export const USING_LIVE_REGISTRY = FIELDS_PATH.endsWith('.local.json');
+export const CONFIG_OUT = join(
+  ROOT, 'n8n', 'nodes', USING_LIVE_REGISTRY ? 'CONFIG.local.json' : 'CONFIG.json'
+);
+
 // Write ONLY when run directly, so a test that imports buildConfig() to check
-// n8n/nodes/CONFIG.json for staleness does not refresh it first.
+// the rendering for staleness does not refresh it first.
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const config = buildConfig();
   const pretty = `${JSON.stringify(config, null, 2)}\n`;
-  writeFileSync(join(ROOT, 'n8n', 'nodes', 'CONFIG.json'), pretty, 'utf8');
+  writeFileSync(CONFIG_OUT, pretty, 'utf8');
   process.stdout.write(
-    `wrote n8n/nodes/CONFIG.json (${pretty.length} bytes, ${Object.keys(config).length} keys)\n` +
-    `  field registry: ${FIELDS_PATH.endsWith('.local.json') ? 'live (.local.json)' : 'placeholder template'}, status=${FIELDS.status}\n` +
-    `  env-sourced at runtime: ${Object.values(ENV_KEYS).join(', ')}\n`
+    `wrote n8n/nodes/${USING_LIVE_REGISTRY ? 'CONFIG.local.json' : 'CONFIG.json'} ` +
+    `(${pretty.length} bytes, ${Object.keys(config).length} keys)\n` +
+    `  field registry: ${USING_LIVE_REGISTRY ? 'LIVE (.local.json, real field keys)' : 'placeholder template'}, status=${FIELDS.status}\n` +
+    `  env-sourced at runtime: ${Object.values(ENV_KEYS).join(', ')}\n` +
+    (USING_LIVE_REGISTRY
+      ? '  this rendering is gitignored; the committed CONFIG.json stays the placeholder\n'
+      : '')
   );
 }

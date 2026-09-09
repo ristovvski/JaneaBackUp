@@ -9,7 +9,7 @@
 // NOT provided — a node that reaches for it should fail here exactly as it
 // would in n8n.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -28,7 +28,11 @@ export const NOW_ISO = '2026-09-09T12:00:00.000Z';
  * env-sourced values plus now_iso.
  */
 export function makeConfig(overrides = {}) {
-  const staticConfig = readJson('n8n', 'nodes', 'CONFIG.json');
+  // Match the patcher: live rendering when present, placeholders otherwise.
+  const live = join(ROOT, 'n8n', 'nodes', 'CONFIG.local.json');
+  const staticConfig = existsSync(live)
+    ? JSON.parse(readFileSync(live, 'utf8'))
+    : readJson('n8n', 'nodes', 'CONFIG.json');
   return {
     ...staticConfig,
     // Deterministic stand-ins for the option ids a live create_fields run

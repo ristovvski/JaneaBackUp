@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 
 import { validate, CONTINUE_ON_FAIL_ALLOWLIST, MUST_NOT_RETRY } from '../../n8n/patch/validate.mjs';
 import { PLACEHOLDER_PATH_A, PLACEHOLDER_PATH_B, USING_PLACEHOLDER_PATHS, stripCredentials } from '../../n8n/patch/patch.mjs';
-import { buildConfig, ENV_KEYS } from '../../scripts/gen_config_node.mjs';
+import { buildConfig, ENV_KEYS, USING_LIVE_REGISTRY } from '../../scripts/gen_config_node.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WF_PATH = join(ROOT, 'n8n', 'workflows', 'WF-ICP-Score.dev.json');
@@ -39,6 +39,24 @@ describe('the patcher and the artefact agree', () => {
   test('the export uses LF endings and ends with a newline', () => {
     assert.ok(!raw.includes('\r'), 'CRLF would make every diff noise');
     assert.ok(raw.endsWith('\n'));
+  });
+
+  test('a real Pipedrive field key never reaches a tracked file', () => {
+    // On a machine that has run create_fields, CONFIG.local.json and the
+    // workflow export carry real 40-hex keys. Both are gitignored. The
+    // committed CONFIG.json must stay placeholders.
+    const committed = readFileSync(join(ROOT, 'n8n', 'nodes', 'CONFIG.json'), 'utf8');
+    assert.ok(
+      !/\b[0-9a-f]{40}\b/.test(committed),
+      'the committed CONFIG.json contains a 40-hex field key — it must stay the placeholder template'
+    );
+    assert.ok(committed.includes('PLACEHOLDER_'), 'and must visibly be a placeholder');
+
+    const registry = readFileSync(join(ROOT, 'config', 'pipedrive_fields.json'), 'utf8');
+    assert.ok(
+      !/\b[0-9a-f]{40}\b/.test(registry),
+      'the committed field registry contains a real key — a live run writes .local.json'
+    );
   });
 
   test('the DEV import payload attaches NO credentials', () => {
@@ -102,9 +120,15 @@ describe('deployment safety', () => {
     assert.ok(!raw.includes('pinData'));
   });
 
-  test('settings.errorWorkflow is set', () => {
+  test('settings.errorWorkflow is set, and is env-sourced not hardcoded', () => {
     assert.ok(wf.settings.errorWorkflow, 'terminal errors must reach an alerting error workflow');
-    assert.equal(wf.settings.errorWorkflow, 'WF-ERR');
+    // n8n resolves an ID here, and the ID is instance-specific, so the source
+    // must come from the environment. Unset, it is the readable placeholder.
+    const source = readFileSync(join(ROOT, 'n8n', 'patch', 'patch.mjs'), 'utf8');
+    assert.ok(source.includes('process.env.ICP_ERROR_WORKFLOW_ID'), 'must be env-sourced');
+    if (!process.env.ICP_ERROR_WORKFLOW_ID) {
+      assert.equal(wf.settings.errorWorkflow, 'WF-ERR');
+    }
   });
 
   test('the committed source holds a PLACEHOLDER webhook path, never a live one', () => {
@@ -207,7 +231,8 @@ describe('CONFIG is first, and holds everything', () => {
     assert.ok(match, 'cannot find the static payload inside the CONFIG expression');
     assert.deepEqual(
       JSON.parse(match[1]), buildConfig(),
-      'n8n/nodes/CONFIG.json is stale — run `npm run gen:config` and rebuild'
+      `${USING_LIVE_REGISTRY ? 'n8n/nodes/CONFIG.local.json' : 'n8n/nodes/CONFIG.json'} ` +
+      'is stale — run `npm run gen:config` and rebuild'
     );
   });
 

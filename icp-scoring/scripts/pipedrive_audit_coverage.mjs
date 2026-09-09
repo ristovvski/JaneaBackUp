@@ -90,7 +90,11 @@ async function fetchOrgFieldNames() {
   do {
     const payload = await get('/api/v2/organizationFields', { limit: 500, cursor });
     for (const field of payload.data || []) {
-      byKey[field.key] = { name: field.name, type: field.field_type, id: field.id };
+      // v2 spells these field_code / field_name — NOT key / name. Accept both
+      // so this keeps working if the account is served the v1 shape.
+      const key = field.field_code !== undefined ? field.field_code : field.key;
+      const name = field.field_name !== undefined ? field.field_name : field.name;
+      if (key) byKey[key] = { name, type: field.field_type, id: field.id ?? null };
     }
     cursor = payload.additional_data?.next_cursor || null;
   } while (cursor);
@@ -249,6 +253,50 @@ for (const org of live) {
   }
 }
 
+// -- how much would the legacy custom URL fields add? (NEEDS_DECISION #10) --
+//
+// Phase 1 reads only the NATIVE website/linkedin. FIELD_AUDIT.md found four
+// overlapping custom URL fields, and the live fill rates say they are far
+// better populated. This measures the union, because "would it help?" is a
+// number, not an opinion.
+const FALLBACK_FIELD_NAMES = [
+  'Website', 'Website URL', 'lh_website',
+  'LinkedIn URL', 'lh_linkedin_profile_url',
+];
+const fallbackKeys = [];
+for (const [key, meta] of Object.entries(fieldNames)) {
+  if (FALLBACK_FIELD_NAMES.includes(meta.name)) fallbackKeys.push({ key, name: meta.name });
+}
+
+const fallback = { withNative: 0, withFallbackOnly: 0, withEither: 0, perField: {} };
+for (const f of fallbackKeys) fallback.perField[f.name] = 0;
+
+for (const org of live) {
+  const custom = org.custom_fields || {};
+  const nativeDomain = (() => {
+    const d = normalizeDomain(org.website);
+    return d && !NON_COMPANY_HOSTS.has(d) && !normalizeLinkedInCompanyUrl(org.website) ? d : null;
+  })();
+  const nativeLinkedIn = normalizeLinkedInCompanyUrl(org.linkedin) ||
+    normalizeLinkedInCompanyUrl(org.website);
+  const hasNative = Boolean(nativeDomain || nativeLinkedIn);
+
+  let hasFallback = false;
+  for (const f of fallbackKeys) {
+    const raw = custom[f.key];
+    if (raw === null || raw === undefined || raw === '') continue;
+    const asLinkedIn = normalizeLinkedInCompanyUrl(raw);
+    const asDomain = normalizeDomain(raw);
+    const usable = Boolean(asLinkedIn) ||
+      Boolean(asDomain && !NON_COMPANY_HOSTS.has(asDomain));
+    if (usable) { hasFallback = true; fallback.perField[f.name] += 1; }
+  }
+
+  if (hasNative) fallback.withNative += 1;
+  if (hasFallback && !hasNative) fallback.withFallbackOnly += 1;
+  if (hasNative || hasFallback) fallback.withEither += 1;
+}
+
 const domainClusters = [...byDomain.entries()].filter(([, v]) => v.length > 1)
   .sort((a, b) => b[1].length - a[1].length);
 const nameClusters = [...byName.entries()].filter(([, v]) => v.length > 1)
@@ -317,6 +365,37 @@ name, and a bare name is explicitly a low-confidence identifier. Since \`revenue
 \`stage_maturity\` and \`company_type\` all gate \`insufficient_data\`, expect a
 substantial share of first-pass results to come back **Insufficient data** rather than graded.
 That is the system working as specified, not a failure — but it is what the demo will show.
+
+## 1b. What the legacy custom URL fields would add (NEEDS_DECISION #10)
+
+Phase 1 reads only the **native** \`website\` and \`linkedin\`. FIELD_AUDIT.md
+(2026-07-23) flagged four overlapping custom URL fields; the fill rates in §4
+say they are far better populated. This is the union, measured:
+
+${fallbackKeys.length === 0 ? '_Custom field names could not be resolved in this mode — re-run in live mode._' : table([
+  ['Identifier source', 'Orgs', 'Share'],
+  ['---', '---:', '---:'],
+  ['Native `website` / `linkedin` only (what Phase 1 reads today)', String(fallback.withNative), pct(fallback.withNative)],
+  ['**Adding the legacy custom fields**', String(fallback.withEither), pct(fallback.withEither)],
+  ['→ organizations recoverable ONLY via a custom field', String(fallback.withFallbackOnly), pct(fallback.withFallbackOnly)],
+])}
+
+${fallbackKeys.length === 0 ? '' : `Per-field contribution (usable value present, may overlap):
+
+${table([
+  ['Custom field', 'Usable', 'Share'],
+  ['---', '---:', '---:'],
+  ...Object.entries(fallback.perField).sort((a, b) => b[1] - a[1]).map(([name, n]) => [`\`${name}\``, String(n), pct(n)]),
+])}
+
+**This is the highest-leverage change available to Phase 1.** Reading the
+custom fields as a fallback moves identifier coverage from
+**${pct(fallback.withNative)}** to **${pct(fallback.withEither)}** —
+${fallback.withFallbackOnly} organizations that today reach Clay as a bare name
+would arrive with a domain or a LinkedIn URL instead. Mechanically it is a
+CONFIG list and three lines in \`resolveIdentifier\`. It is **NEEDS_DECISION**
+because which of the overlapping fields is canonical, and what to do when two
+disagree, is a data-ownership question.`}
 
 ## 2. Data-quality defects in the identifier fields
 
@@ -408,11 +487,15 @@ Those values were written by a human or a prior process. \`ICP Final\` is never 
 ### Custom-field fill rates in this scope
 
 ${customFieldFill.size === 0 ? '_No custom fields were requested in this scope._' : table([
-  ['Field key', 'Name', 'Non-empty', 'Share'],
+  ['Field', 'Type', 'Non-empty', 'Share'],
   ['---', '---', '---:', '---:'],
-  ...[...customFieldFill.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([key, n]) =>
-    [`\`${key.slice(0, 12)}…\``, fieldNames[key]?.name || '_(needs a token to resolve)_', String(n), pct(n)]
-  ),
+  // Field NAME only. A 40-hex field key is an account identifier and this file
+  // is committed; the name is what a reader needs anyway.
+  ...[...customFieldFill.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([key, n]) => [
+    fieldNames[key] ? `\`${fieldNames[key].name}\`` : '_(unresolved — run in live mode)_',
+    fieldNames[key] ? fieldNames[key].type : '—',
+    String(n), pct(n),
+  ]),
 ])}
 
 ---

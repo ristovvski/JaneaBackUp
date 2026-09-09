@@ -19,7 +19,7 @@
 //   node n8n/patch/patch.mjs            build + validate
 //   node n8n/patch/patch.mjs --check    validate only; fail if a rebuild would differ
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { validate } from './validate.mjs';
@@ -32,7 +32,14 @@ const API_OUT = join(ROOT, 'n8n', 'workflows', 'api-payload.json');
 const IMPORT_OUT = join(ROOT, 'n8n', 'workflows', 'import-dev-no-credentials.json');
 
 const code = (name) => readFileSync(join(NODES, `${name}.js`), 'utf8');
-const CONFIG_STATIC = JSON.parse(readFileSync(join(NODES, 'CONFIG.json'), 'utf8'));
+
+// Prefer the live rendering (real field keys, gitignored) when a create_fields
+// run has produced one; fall back to the committed placeholder so a fresh
+// clone builds and tests.
+const CONFIG_LIVE = join(NODES, 'CONFIG.local.json');
+const CONFIG_PATH = existsSync(CONFIG_LIVE) ? CONFIG_LIVE : join(NODES, 'CONFIG.json');
+export const CONFIG_IS_LIVE = CONFIG_PATH === CONFIG_LIVE;
+const CONFIG_STATIC = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
 
 // The four values that must never sit in a file: a Clay webhook URL is an
 // unguessable endpoint, so it is a secret. Spliced from $env at runtime.
@@ -81,6 +88,13 @@ const PIPEDRIVE_V1 = 'https://api.pipedrive.com/v1';
 // build with the variables unset produces the placeholder, which n8n will
 // happily register and which you must not use for anything real.
 // ---------------------------------------------------------------------------
+// settings.errorWorkflow must be the error workflow's ID, not its name — n8n
+// resolves an id. On this instance WF-ERR is a real workflow with a real id,
+// which is instance-specific, so it comes from the environment and defaults to
+// the readable placeholder for a fresh clone.
+export const PLACEHOLDER_ERROR_WORKFLOW = 'WF-ERR';
+const ERROR_WORKFLOW = process.env.ICP_ERROR_WORKFLOW_ID || PLACEHOLDER_ERROR_WORKFLOW;
+
 export const PLACEHOLDER_PATH_A = 'REPLACE-ME-icp-score-pipedrive';
 export const PLACEHOLDER_PATH_B = 'REPLACE-ME-icp-scored-clay';
 
@@ -473,7 +487,7 @@ export function buildWorkflow() {
       executionOrder: 'v1',
       // Anything this workflow's own error branch cannot handle — a failed
       // PATCH cannot mark itself as Errored — reaches WF-ERR, which Slacks.
-      errorWorkflow: 'WF-ERR',
+      errorWorkflow: ERROR_WORKFLOW,
       saveManualExecutions: true,
       callerPolicy: 'workflowsFromSameOwner',
     },
@@ -567,10 +581,12 @@ if (isMain) {
     `wrote n8n/workflows/api-payload.json (${apiPayload.length} bytes)\n` +
     `wrote n8n/workflows/import-dev-no-credentials.json (${importPayload.length} bytes)\n` +
     `  nodes: ${workflow.nodes.length} (${codeNodes.length} Code)\n` +
-    `  active: ${workflow.active}  errorWorkflow: ${workflow.settings.errorWorkflow}\n` +
+    `  active: ${workflow.active}  errorWorkflow: ${workflow.settings.errorWorkflow}` +
+    `${ERROR_WORKFLOW === PLACEHOLDER_ERROR_WORKFLOW ? ' (placeholder — set ICP_ERROR_WORKFLOW_ID)' : ' (from env)'}\n` +
     `  credentials in canonical export: ${credentialled} node(s)\n` +
     `  credentials in import payload:   0 (stripped)\n` +
     `  webhook paths: ${USING_PLACEHOLDER_PATHS ? 'PLACEHOLDER — set ICP_WEBHOOK_PATH_A/B for a real import' : 'from ICP_WEBHOOK_PATH_A/B'}\n` +
+    `  CONFIG source: ${CONFIG_IS_LIVE ? 'CONFIG.local.json (LIVE field keys)' : 'CONFIG.json (placeholders)'}\n` +
     `  validate(): clean\n`
   );
   if (USING_PLACEHOLDER_PATHS) {

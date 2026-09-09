@@ -117,14 +117,40 @@ against the CSV is still a human read.
 
 ### 1.2 Phase 0 changes what the demo will show
 
-`reports/coverage.md`, over 2,000 organizations (newest-first, May–Sep 2026):
+**Now a FULL PASS over all 21,621 organizations** (Apr 2020 – Sep 2026), not a
+sample. The 2,000-newest sample was badly optimistic — recent records are the
+ones the outbound machine created with URLs attached; the long tail is not:
 
-| Signal | Share |
-|---|---|
-| Yields a **usable root domain** | **19.6%** |
-| Usable LinkedIn company URL (either field) | 22.6% |
-| **Neither** domain nor LinkedIn — scored from name at low confidence | **76.8%** |
-| No usable name at all | 0.0% |
+| Signal | Full pass (21,621) | 2,000 newest (superseded) |
+|---|---|---|
+| Yields a **usable root domain** | **4.0%** | 19.6% |
+| Usable LinkedIn company URL (either field) | 4.3% | 22.6% |
+| **Neither** domain nor LinkedIn — scored from name at low confidence | **95.5%** | 76.8% |
+| No usable name at all | 0.1% (14 orgs) | 0.0% |
+
+**Nearly every organization in the CRM reaches Clay as a bare name.** Sampling
+the newest records overstated coverage by roughly 5×, which is a warning about
+sampling a CRM by recency at all.
+
+### 1.2b The single highest-leverage fix: 4.5% → 35.6%
+
+Section 2 of the earlier report guessed the legacy custom URL fields might
+help. Measured, they do — enormously:
+
+| Identifier source | Orgs | Share |
+|---|---:|---:|
+| Native `website`/`linkedin` — what Phase 1 reads today | 963 | **4.5%** |
+| **Adding the legacy custom fields** | 7,703 | **35.6%** |
+| → recoverable ONLY via a custom field | 6,740 | 31.2% |
+
+Per field: `lh_linkedin_profile_url` 25.5%, `Website` 19.4%, `Website URL` 8.0%,
+`lh_website` 6.7%, `LinkedIn URL` 5.8%.
+
+An **8× improvement in the input quality of the whole system**, for a CONFIG
+list and three lines in `resolveIdentifier`. It is `NEEDS_DECISION #10` only
+because *which* of the overlapping fields is canonical, and what to do when two
+disagree, is a data-ownership question — not because the change is hard. This
+is the one thing I would want decided before Tuesday.
 
 `revenue_range`, `stage_maturity` and `company_type` each gate
 `insufficient_data`. So **a large share of first-pass results will come back
@@ -132,15 +158,8 @@ against the CSV is still a human read.
 specified — an honest `null` beats a confident guess — but it is much better
 said now than during the demo.
 
-Two mitigations, both cheap, both decisions rather than code:
-
-1. **`docs/DISCOVERY/FIELD_AUDIT.md` (2026-07-23) found four *other* org URL
-   fields** — `Website`, `LinkedIn URL`, `lh_website`, `Website URL` — at
-   20.7 / 18.0 / 17.7 / 17.7% fill. Phase 1 reads only the **native** `website`
-   and `linkedin`. Reading the custom fields as a fallback could roughly double
-   identifier coverage. It is a one-line CONFIG addition. **Which of the four is
-   canonical is a data-ownership question — flagged, not decided.**
-2. For the demo, seed a handful of organizations with real domains.
+For the demo itself, either take §1.2b or seed a handful of organizations with
+real domains.
 
 ### 1.3 A score-corrupting bug the audit found — fixed
 
@@ -169,16 +188,34 @@ name. 11 tests cover it.
 No normalizer can fix a website field naming the wrong company. Those records
 need a human.
 
-### 1.4 Duplicates are real and out of scope
+### 1.4 Duplicates: far worse than the sample suggested
 
-23 normalized-name clusters in the 2,000-organization sample — including
-**Sumersports five times**, a rubric reference client — plus one domain
-cluster. Sample clustering *undercounts* by construction (both records must
-fall in the sample), so those are floors.
+The full pass turns this from a footnote into a cost problem:
 
-Dedup is explicitly out of Phase 1. The consequence at the demo: a duplicated
-company can show two different grades, and the honest answer is "because there
-are two records".
+| Clustering key | Clusters | Orgs in a cluster | Excess records |
+|---|---:|---:|---:|
+| Root domain | 24 | 57 (0.3%) | 33 |
+| **Normalized name** | **1,381** | **6,202 (28.7%)** | **4,821** |
+
+**Oracle appears 708 times.** ADP 174, Salesforce 148, VMware 103, HPE 99,
+Adobe 90, Cerner 89, SAP North America 76. Better than a quarter of the CRM
+sits in a name-duplicate cluster. The sample found 23 clusters; there are 1,381.
+
+Dedup is out of Phase 1 by scope, and that stays true — but the consequence is
+now quantified and is not only cosmetic:
+
+- A deal on any one of 708 Oracle records scores **that record only**. Score
+  them all and that is 708 Clay credit sets, 708 notes and 708 audit rows for
+  one company.
+- The 180-day gate is **per record**, so it offers no protection: each
+  duplicate has its own `ICP Scored At`.
+- A rep looking at two Oracle records can legitimately see two different
+  grades, because two records were enriched independently.
+
+`normalizeCompanyName` is what found these, and its correctness is on display:
+it collapses `KBR, Inc.`/`KBR`, `FICO®`/`FICO`, `Accumetrics Limited`/
+`Accumetrics` and `Vmware`/`VMware`. The clustering key for a future dedup pass
+already exists and is unit-tested.
 
 It also validates `normalizeCompanyName`, which correctly collapses
 `KBR, Inc.`/`KBR`, `FICO®`/`FICO`, `Accumetrics Limited`/`Accumetrics` and
@@ -456,7 +493,7 @@ All eleven are one-line changes. §11's nine, plus two I hit that §11 does not 
 | 7 | Audit store | **Google Sheet `ICP_Audit`** | one append node behind a CONFIG-held sheet id. Fine at ~15/day, wrong at scale (append quotas, no query). |
 | 8 | Live test target | **`DEV_`-prefixed orgs in the real account, deleted at teardown** | `tests/live/dev_e2e.mjs`. Audit rows deliberately left. |
 | 9 | Enrichment providers | **Apollo primary for revenue/funding; others named slots** | `engine/clay_table_spec.md`. |
-| **10** | **Which of the four org URL fields is canonical** | **None — Phase 1 reads only native `website`/`linkedin`** | Reading the custom fields as a fallback could roughly double identifier coverage (§1.2). A data-ownership question. |
+| **10** | **Which of the five legacy org URL fields is canonical** | **None — Phase 1 reads only native `website`/`linkedin`** | **Measured: reading them as a fallback takes identifier coverage from 4.5% to 35.6%, recovering 6,740 organizations** (§1.2b). A CONFIG list plus three lines. The blocker is data ownership, not effort. |
 | **11** | **Does a previous `Error`/`Insufficient data` count as a fresh score?** | **No — those re-score** | `CONFIG.rescore_on_error_or_insufficient`. §8.1 read literally says any present value counts, which would freeze an org out of scoring for 180 days because of a transient Clay outage. Both readings are tested. |
 
 ### 5.1 Two spec discrepancies, resolved and recorded
