@@ -334,8 +334,32 @@ Proof that §0's defect is actually fixed — the pushed branch, cloned into an
 empty directory, with no working-directory state to lean on:
 
 ```
-FRESH_CLONE_PROOF
+$ git clone --branch claude/icp-scoring-pipedrive-phase-1-9tmnok <repo> fresh
+$ cd fresh/icp-scoring && npm ci
+
+$ npm test
+  (pretest) nodes: 35 (10 Code)
+            active: false  errorWorkflow: WF-ERR
+            credentials in canonical export: 11 node(s)
+            credentials in import payload:   0 (stripped)
+  ok  a rebuild is byte-identical (the patcher is deterministic)
+  ok  every jsCode is byte-identical to its file in n8n/nodes/
+  # tests 441      # pass 441      # fail 0      # skipped 0
+  (posttest) secret scan (tracked files): 80 scanned, 0 finding(s) — clean
+
+$ node n8n/patch/patch.mjs --check
+  --check: WF-ICP-Score.dev.json is byte-identical to a fresh build.
+
+$ node scripts/scan_secrets.mjs --history
+  secret scan (every blob in every commit): 99 blobs, 0 finding(s) — clean
+
+$ npm run proof
+  3/3 mutations detected.   git status clean: true   suite green again: true
 ```
+
+The clone contains no workflow export, no `.env`, and no live field registry —
+and reproduces all of it from tracked sources anyway. That is the check I
+should have run before the first push.
 
 ### 4.2 Discriminating-test proof (§9.6)
 
