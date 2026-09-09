@@ -113,6 +113,11 @@ harness **skips** — never passes — an account with no captured facts.
 All three read `PIPEDRIVE_API_TOKEN` from the environment. None writes a
 credential to a file, puts one in a URL, or logs one.
 
+With a local `.env`, Node reads it natively — no wrapper needed:
+`node --env-file=/path/to/.env scripts/<script>.mjs`. See RUNBOOK.md
+"Supplying credentials" for the least-privilege set and why a remote session
+cannot see your local file.
+
 ```bash
 # Phase 0 audit — READ ONLY, GETs only
 PIPEDRIVE_API_TOKEN=... npm run audit:coverage

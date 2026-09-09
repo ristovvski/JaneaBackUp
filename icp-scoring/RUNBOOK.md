@@ -23,6 +23,37 @@ built it.
 In this order. Steps 1–3 are read-only or idempotent; nothing before step 5
 sends a single deal through.
 
+### Supplying credentials
+
+Every script reads its credentials from the **environment** — never from a file
+in this repo, never from a command-line argument (which would land in your
+shell history), never from a URL.
+
+If you keep a local `.env`, Node reads it natively; no wrapper and no code
+change:
+
+```bash
+node --env-file=/path/to/.env scripts/pipedrive_create_fields.mjs --dry-run
+node --env-file=/path/to/.env scripts/pipedrive_audit_coverage.mjs
+node --env-file=/path/to/.env tests/live/dev_e2e.mjs
+```
+
+`.env` is in `.gitignore`. Keep it there.
+
+> **Least privilege.** This build needs exactly two secrets:
+> `PIPEDRIVE_API_TOKEN` and, for the DEV import and the live suite,
+> `N8N_API_KEY` (+ `N8N_BASE_URL`). It never touches Smartlead, HeyReach,
+> Make or OpenAI. If your `.env` is the shared outreach-stack one, prefer a
+> trimmed copy holding only those keys — the classifiers run on Claude, so an
+> `OPENAI_API_KEY` in scope here buys nothing and risks something.
+
+> **A remote Claude Code session cannot see your local `.env`.** The container
+> is cloned fresh from git, and `.env` is untracked by design. To run these
+> from a web session, set the values as **environment variables on the remote
+> environment** instead of uploading the file — see
+> <https://code.claude.com/docs/en/claude-code-on-the-web>. Uploading or
+> pasting the file puts live production keys into a stored transcript.
+
 ### 1. Phase 0 audit (read-only)
 
 ```bash
