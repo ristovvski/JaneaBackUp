@@ -352,7 +352,11 @@ function openAiNode({ name, bodyFrom, bodyPath, after }) {
         shouldRetry: fixed(true),
         'retryOptions|maxRetries': fixed(3),
         'retryOptions|statusCodesToRetry': fixed(['429', '500-599']),
-        responseTimeout: fixed(120000),
+        // 90s. There is an undocumented ceiling somewhere between 90000 and
+        // 120000: `nodes update` accepts 120000 without complaint and the call
+        // then fails at run time with an opaque ERROR_ACTION_RUNTIME_ERROR and
+        // no HTTP status. Measured — see clay/WORKFLOW.md.
+        responseTimeout: fixed(90000),
       }),
       incomingEdges: [{ __from: after }],
     },

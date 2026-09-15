@@ -270,14 +270,28 @@ re-run creates a *second* trigger — and since a trigger may have only one
 outgoing edge, the first is orphaned and `graph validate` fails with
 `trigger_not_connected`. The builder reads the node id back with `triggers get`.
 
-### 11. A tool node's `inputSchema` is replaced by the action's own on save
+### 11. `responseTimeout` has an undocumented ceiling, and overshooting it fails opaquely
+
+`http-api-v2` accepts `responseTimeout: 120000` at save time without complaint.
+The call then fails at run time with `ERROR_ACTION_RUNTIME_ERROR`, no HTTP
+status and empty outputs — the same error text a malformed body produces, which
+sent the first debugging pass at the request body rather than at the parameter.
+90000 works, 120000 does not; the ceiling is somewhere between. Every OpenAI
+node here uses 90s.
+
+The general lesson, which cost two runs: an `http-api-v2` failure reports
+nothing about *why*. Reproducing the node's exact inputs through
+`clay workflows actions test` is the only way to see the real error, and it is
+worth doing before re-running a graph.
+
+### 12. A tool node's `inputSchema` is replaced by the action's own on save
 
 Pins written onto a tool node's `inputSchema` are normalized away and replaced
 by the action's parameter schema. They survive only as long as
 `inputMappingConfig` references them by name, which is why every tool node here
 maps its inputs through `inputMappingConfig`.
 
-### 12. No documented accessor for the run id inside a code node
+### 13. No documented accessor for the run id inside a code node
 
 `event_id` is specified as the Clay row-run id and is the Path B dedupe key. A
 code node's `context` exposes no run id; it appears only inside the private
@@ -285,7 +299,7 @@ code node's `context` exposes no run id; it appears only inside the private
 `req-<request_id>`, which is unique per scoring request and dedupes exactly as
 well.
 
-### 13. The four website pages are guessed, not discovered
+### 14. The four website pages are guessed, not discovered
 
 `clay_table_spec.md` §5 names homepage, `/about`, `/product` and `/careers`.
 Node 04 constructs those four URLs from the domain, which is right often enough

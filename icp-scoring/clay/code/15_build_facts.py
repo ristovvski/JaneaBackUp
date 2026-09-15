@@ -305,14 +305,14 @@ def handler(context):
                             _text(context.get_input("profile_country"))) if p]
     facts["li_hq"] = ", ".join(hq_parts) if hq_parts else None
 
-    # --- website (nodes 06-08) --------------------------------------------
+    # --- website (nodes 06-10) --------------------------------------------
     summary = _text(context.get_input("website_summary"))
     reachable = _text(context.get_input("website_pages_reachable"))
     if summary and reachable:
         summary = "%s\n\nPages reachable: %s" % (summary, reachable)
     facts["website_summary"] = summary
 
-    # --- revenue and headcount (node 09, falling back to node 03) ---------
+    # --- revenue and headcount (node 11, falling back to node 03) ---------
     # Primary is the firmographic provider's inferred revenue; the company
     # profile lookup's band is the fallback. Whichever wins, `revenue_source`
     # names it, and carries the band text when the figure came from one — so a
@@ -321,9 +321,17 @@ def handler(context):
     profile_revenue, profile_band = _revenue(context.get_input("profile_annual_revenue"))
     if pdl_revenue is not None:
         facts["revenue_estimate_usd"] = pdl_revenue
-        facts["revenue_source"] = (
-            "Firmographic enrichment (inferred)" + (' (band "%s")' % pdl_band if pdl_band else "")
-        )
+        source = "Firmographic enrichment (inferred)" + (' (band "%s")' % pdl_band if pdl_band else "")
+        # When both providers answered and they disagree by more than 2x, say so
+        # in the source line. revenue_range is a gating component, and the
+        # preamble tells the classifier that two facts contradicting each other
+        # is low confidence — it can only apply that rule if it can SEE the
+        # contradiction, and the closed schema has nowhere else to put it.
+        if profile_revenue is not None and max(pdl_revenue, profile_revenue) > 2 * min(pdl_revenue, profile_revenue):
+            source += "; company profile lookup disagrees%s" % (
+                ' (band "%s")' % profile_band if profile_band else " (%s)" % profile_revenue
+            )
+        facts["revenue_source"] = source
     elif profile_revenue is not None:
         facts["revenue_estimate_usd"] = profile_revenue
         facts["revenue_source"] = (
@@ -337,31 +345,50 @@ def handler(context):
     if facts["li_headcount"] is None:
         facts["li_headcount"] = _int(context.get_input("pdl_employee_count"))
 
-    # --- financing (node 12, with the firmographic provider as fallback) ---
+    # --- financing (nodes 11 and 12) --------------------------------------
     #
-    # The financing-events provider is authoritative for the ROUND — it carries
-    # the amount with its date. It is often silent on the stage NAME, and the
-    # stage is what stage_maturity reads, so that falls back to the
-    # firmographic provider's `latest_funding_stage`. Deliberately no scavenging
-    # of a stage from an older round: labelling a 2023 $10M round "seed" because
-    # an undated seed event exists would be worse than saying nothing.
+    # Two sources that disagree about which round is the latest: the
+    # financing-events provider is authoritative for the AMOUNT (it carries the
+    # figure with its date) while the firmographic provider often knows about a
+    # more recent round and names its STAGE.
+    #
+    # The rule is that the stage and the date must describe the SAME round. The
+    # newer date wins outright, and the amount is only carried when the round it
+    # belongs to is the one that won. Mixing them — a 2025 stage against a 2023
+    # date — reads to stage_maturity as one coherent fact, and is not one.
     financing = _latest_financing(_list(context.get_input("financing_events")))
+    events_date = None
     if financing:
-        round_date = _date(financing.get("effective_date")) or _date(financing.get("found_at"))
+        events_date = _date(financing.get("effective_date")) or _date(financing.get("found_at"))
+    firmographic_date = _date(context.get_input("pdl_last_funding_date"))
+    firmographic_stage = _text(context.get_input("pdl_funding_stage"))
+
+    use_firmographic = (
+        firmographic_date is not None
+        and (events_date is None or firmographic_date[0] > events_date[0])
+    )
+
+    if use_firmographic:
+        facts["funding_stage"] = firmographic_stage
+        facts["last_round_date"] = firmographic_date[1]
+        # That provider reports a stage and a date, not a round size. Carrying
+        # the older round's amount against this newer date would be a fabricated
+        # fact; null is the honest answer.
+        facts["last_round_usd"] = None
+    elif financing:
         facts["funding_stage"] = (
             _text(financing.get("financing_type_normalized"))
             or _text(financing.get("financing_type"))
-            or _text(context.get_input("pdl_funding_stage"))
+            or firmographic_stage
         )
-        facts["last_round_date"] = round_date[1] if round_date else None
+        facts["last_round_date"] = events_date[1] if events_date else None
         facts["last_round_usd"] = _number(financing.get("amount_normalized")) or _number(financing.get("amount"))
     else:
-        facts["funding_stage"] = _text(context.get_input("pdl_funding_stage"))
-        pdl_date = _date(context.get_input("pdl_last_funding_date"))
-        facts["last_round_date"] = pdl_date[1] if pdl_date else None
+        facts["funding_stage"] = firmographic_stage
+        facts["last_round_date"] = None
         facts["last_round_usd"] = None
 
-    # --- jobs (node 11) ----------------------------------------------------
+    # --- jobs (node 13) ----------------------------------------------------
     jobs_ran = not _blank(context.get_input("jobs_domain"))
     open_eng, open_60d, senior = _summarize_jobs(
         _list(context.get_input("jobs")), today, jobs_ran,
@@ -370,7 +397,7 @@ def handler(context):
     facts["eng_roles_open_60d_plus"] = open_60d
     facts["senior_eng_roles"] = senior
 
-    # --- news (node 12) ----------------------------------------------------
+    # --- news (node 14) ----------------------------------------------------
     # `[]` is evidence (we looked, the window is empty) where null is not
     # (we never looked) — and activation_state is told to read them
     # differently. The provider echoes the domain on every result including a
