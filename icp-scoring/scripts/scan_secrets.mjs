@@ -15,6 +15,9 @@
 //   node scripts/scan_secrets.mjs              scan the working tree (tracked + untracked)
 //   node scripts/scan_secrets.mjs --tracked    scan only what git tracks
 //   node scripts/scan_secrets.mjs --history    scan every blob in every commit
+//   node scripts/scan_secrets.mjs --repo       widen any mode to the whole repo
+//                                              (the default is this subtree only,
+//                                              and the output always says which)
 //
 // Exit 0 = clean. Exit 1 = something matched.
 
@@ -113,16 +116,30 @@ function scanText(label, text) {
 const mode = process.argv.includes('--history') ? 'history'
   : process.argv.includes('--tracked') ? 'tracked' : 'worktree';
 
+// --- scope ------------------------------------------------------------------
+//
+// Every mode defaults to THIS SUBTREE, which is what `npm test` needs and what
+// the pathspec below expresses. That default was also a trap: the output said
+// "every blob in every commit" while scanning `icp-scoring/` only, so a green
+// --history run read as "the repository is clean" when it only ever meant "this
+// subtree is clean". Four files outside the subtree carried a marker through 14
+// commits the whole time that line was printing green.
+//
+// --repo drops the pathspec and scans the whole repository. The scope is now
+// named in the output either way, so the claim always matches the work.
+const repoWide = process.argv.includes('--repo');
+const PATHSPEC = repoWide ? [] : ['--', PREFIX];
+
 let findings = [];
 let scanned = 0;
 
 if (mode === 'history') {
-  // Every blob reachable from every ref, under this subtree.
+  // Every blob reachable from every ref, within the chosen scope.
   const revs = execFileSync('git', ['rev-list', '--all'], { cwd: REPO, encoding: 'utf8' })
     .split('\n').filter(Boolean);
   const seen = new Set();
   for (const rev of revs) {
-    const entries = execFileSync('git', ['ls-tree', '-r', rev, '--', PREFIX], {
+    const entries = execFileSync('git', ['ls-tree', '-r', rev, ...PATHSPEC], {
       cwd: REPO, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
     }).split('\n').filter(Boolean);
     for (const entry of entries) {
@@ -142,10 +159,10 @@ if (mode === 'history') {
 } else {
   let files;
   if (mode === 'tracked') {
-    files = execFileSync('git', ['ls-files', '--', PREFIX], { cwd: REPO, encoding: 'utf8' })
+    files = execFileSync('git', ['ls-files', ...PATHSPEC], { cwd: REPO, encoding: 'utf8' })
       .split('\n').filter(Boolean).map((f) => join(REPO, f));
   } else {
-    files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '--', PREFIX], {
+    files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', ...PATHSPEC], {
       cwd: REPO, encoding: 'utf8',
     }).split('\n').filter(Boolean).map((f) => join(REPO, f));
   }
@@ -160,7 +177,10 @@ if (mode === 'history') {
 }
 
 const label = { history: 'every blob in every commit', tracked: 'tracked files', worktree: 'working tree' }[mode];
-process.stdout.write(`secret scan (${label}): ${scanned} file(s)/blob(s) scanned, ${findings.length} finding(s)\n`);
+const scope = repoWide ? 'whole repository' : `${PREFIX} only`;
+process.stdout.write(
+  `secret scan (${label}, ${scope}): ${scanned} file(s)/blob(s) scanned, ${findings.length} finding(s)\n`,
+);
 
 if (findings.length > 0) {
   process.stdout.write('\nMatched text is deliberately not printed.\n\n');
