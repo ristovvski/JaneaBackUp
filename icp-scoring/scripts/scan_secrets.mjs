@@ -65,6 +65,13 @@ const RULES = [
       || /\/tmp\/|scratchpad|claude-\d/.test(line),
   },
   {
+    id: 'foreign-workspace',
+    why: 'a reference to a Clay workspace other than Janea Systems (332169)',
+    // Only the Janea workspace may be named anywhere in this repository.
+    re: new RegExp(['\\b3091', '40\\b|\\bPostindu', 'stria\\b|@postindu', 'stria\\.com'].join(''), 'i'),  // built from fragments: this file may not contain the names it hunts for
+    allow: (line) => /\{\{OTHER_WORKSPACE|\{\{REDACTED_EMAIL/.test(line),
+  },
+  {
     id: 'n8n-credential-block',
     why: 'an n8n credential reference (SECURITY.md: exports carry credential references)',
     re: /"credentials"\s*:\s*\{/,
