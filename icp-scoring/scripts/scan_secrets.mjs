@@ -61,8 +61,14 @@ const RULES = [
     //   - a UUID inside a /tmp or scratchpad PATH is a directory segment (a
     //     Claude Code session id), which is why the audit report now prints
     //     only the directory basename.
+    //   - a Clay `actionPackageId` is a PUBLIC catalog identifier: it is the
+    //     same value in every Clay workspace, it is what
+    //     `clay workflows actions list` prints, and it authenticates nothing.
+    //     Allowed only on a line that names it as such, so a real credential
+    //     cannot hide behind the word.
     allow: (line) => /correlation_id|_fixture|\bnil\b|00000000-0000/.test(line)
-      || /\/tmp\/|scratchpad|claude-\d/.test(line),
+      || /\/tmp\/|scratchpad|claude-\d/.test(line)
+      || /actionPackageId|packageId|^\s*(cpj|clay|apollo|predictleads|pdl):\s*'/.test(line),
   },
   {
     id: 'foreign-workspace',

@@ -57,10 +57,27 @@ n8n/nodes/CONFIG.local.json
 !config/pipedrive_fields.json
 !config/clay.example.json
 !engine/schemas/*.json
+!engine/schemas/openai/*.json
 !n8n/nodes/CONFIG.json
 !tests/fixtures/pipedrive/*.json
 !tests/fixtures/clay/*.json
 !tests/golden/expected.json
 !tests/golden/facts/*.json
+!tests/golden/events/*.json
 !package.json
 !package-lock.json
+
+# ---------------------------------------------------------------------------
+# allow-list: Python
+#
+# The repository root excludes `*.py` wholesale, exactly as it excludes
+# `*.json`, and it swallowed this subtree's Python the same way: commit 1a7729d
+# is titled "Python port of the scorer" and does not contain the scorer. A fresh
+# clone had no engine/clay_score.py, so tests/contract/python_parity.test.mjs
+# and tests/static/clay_nodes.test.mjs could not have passed from one.
+#
+# Same fix as the JSON rule above: an explicit allow-list, so adding a Python
+# source is a decision rather than an accident.
+# ---------------------------------------------------------------------------
+!engine/clay_score.py
+!clay/code/*.py
