@@ -1,0 +1,135 @@
+{
+  "event": "icp.scored",
+  "score": {
+    "flags": [
+      "unknown_vertical",
+      "insufficient:stage_maturity,revenue_range,company_type"
+    ],
+    "grade": null,
+    "status": "insufficient_data",
+    "composite": 10,
+    "multiplier": 0.85,
+    "final_score": 9,
+    "levels_used": {
+      "industry": 0,
+      "geography": 10,
+      "company_type": 0,
+      "buying_signal": 0,
+      "revenue_range": 0,
+      "stage_maturity": 0
+    },
+    "industry_tier": null,
+    "model_version": "v5",
+    "industry_level": 0,
+    "tier2_candidate": false,
+    "confidence_overall": "low",
+    "buying_signal_level": null,
+    "activation_state_used": "Stable",
+    "final_score_without_activation": 10
+  },
+  "org_id": "TEST-NAMEONLY",
+  "deal_id": null,
+  "event_id": "req-req-clay-wf-nameonly-001",
+  "clay_table": "ICP_Engine v5 [DEV] (Clay Workflow)",
+  "components": {
+    "geography": {
+      "value": 10,
+      "evidence": [
+        "hq_country: United States"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "company_type": {
+      "value": null,
+      "evidence": [],
+      "confidence": "low",
+      "missing_inputs": [
+        "li_description",
+        "website_summary"
+      ]
+    },
+    "buying_signal": {
+      "value": null,
+      "evidence": [],
+      "confidence": "low",
+      "missing_inputs": [
+        "open_eng_roles_count",
+        "eng_roles_open_60d_plus",
+        "senior_eng_roles",
+        "last_round_date",
+        "last_round_usd",
+        "news_last_12mo"
+      ]
+    },
+    "revenue_range": {
+      "value": null,
+      "evidence": [
+        "revenue_estimate_usd: null",
+        "revenue_source: null"
+      ],
+      "confidence": "low",
+      "missing_inputs": [
+        "revenue_estimate_usd"
+      ]
+    },
+    "stage_maturity": {
+      "value": null,
+      "evidence": [
+        "funding_stage: null",
+        "open_eng_roles_count: null",
+        "eng_roles_open_60d_plus: null"
+      ],
+      "confidence": "low",
+      "missing_inputs": [
+        "funding_stage",
+        "open_eng_roles_count",
+        "eng_roles_open_60d_plus"
+      ]
+    },
+    "activation_state": {
+      "value": "Stable",
+      "evidence": [
+        "news_last_12mo: null",
+        "last_round_date: null",
+        "open_eng_roles_count: null",
+        "eng_roles_open_60d_plus: null",
+        "senior_eng_roles: null"
+      ],
+      "confidence": "low",
+      "missing_inputs": [
+        "news_last_12mo",
+        "last_round_date",
+        "open_eng_roles_count",
+        "eng_roles_open_60d_plus",
+        "senior_eng_roles"
+      ],
+      "evidence_dated_within_months": null
+    },
+    "industry_vertical": {
+      "value": null,
+      "evidence": [
+        "li_industry: null",
+        "li_description: null",
+        "website_summary: null"
+      ],
+      "confidence": "low",
+      "missing_inputs": [
+        "li_industry",
+        "li_description",
+        "website_summary"
+      ]
+    }
+  },
+  "emitted_at": "2026-09-15T13:50:37Z",
+  "request_id": "req-clay-wf-nameonly-001",
+  "clay_row_url": null,
+  "facts_summary": {
+    "revenue_usd": null,
+    "headcount_eng": null,
+    "headcount_total": null
+  },
+  "model_version": "v5",
+  "identifier_kind": "name",
+  "identifier_value": "harbor point analytics"
+}
