@@ -270,28 +270,85 @@ re-run creates a *second* trigger — and since a trigger may have only one
 outgoing edge, the first is orphaned and `graph validate` fails with
 `trigger_not_connected`. The builder reads the node id back with `triggers get`.
 
-### 11. `responseTimeout` has an undocumented ceiling, and overshooting it fails opaquely
+### 11. `responseTimeout` has a ceiling of 100000ms — and I missed where it says so
 
-`http-api-v2` accepts `responseTimeout: 120000` at save time without complaint.
-The call then fails at run time with `ERROR_ACTION_RUNTIME_ERROR`, no HTTP
-status and empty outputs — the same error text a malformed body produces, which
-sent the first debugging pass at the request body rather than at the parameter.
-90000 works, 120000 does not; the ceiling is somewhere between. Every OpenAI
-node here uses 90s.
+The nodes were built with `responseTimeout: 120000`. `nodes update` accepts that
+without complaint and the call then fails at run time with
+`ERROR_ACTION_RUNTIME_ERROR`, no HTTP status and empty outputs — the same error
+text a malformed body produces, which sent the first debugging pass at the
+request body rather than at the parameter.
 
-The general lesson, which cost two runs: an `http-api-v2` failure reports
-nothing about *why*. Reproducing the node's exact inputs through
-`clay workflows actions test` is the only way to see the real error, and it is
-worth doing before re-running a graph.
+**The limit is documented, and it is documented in the one place I had not
+read.** `clay workflows actions schema` prints each parameter's `description`,
+and this one says verbatim: *"Override the default maximum wait time for a
+response from the API in milliseconds. Minimum is 1000ms and maximum is
+100000ms."* I had been reading parameter *names* out of that output and
+skipping the prose. Every node here now uses 90s.
 
-### 12. A tool node's `inputSchema` is replaced by the action's own on save
+The transferable lesson is not about Clay: read the whole schema, including the
+descriptions, before binding a value to a parameter.
 
-Pins written onto a tool node's `inputSchema` are normalized away and replaced
-by the action's parameter schema. They survive only as long as
-`inputMappingConfig` references them by name, which is why every tool node here
-maps its inputs through `inputMappingConfig`.
+The real Clay-side gap here is the error reporting. An `http-api-v2` failure
+inside a node says `ERROR_ACTION_RUNTIME_ERROR` and nothing else — no status,
+no body, no parameter name. Reproducing the node's exact inputs through
+`clay workflows actions test`, which *does* return the real error, is the only
+way to see why, and it is worth doing before re-running a graph.
 
-### 13. No documented accessor for the run id inside a code node
+### 12. An HTTP API account is attached to every `http-api-v2` tool instance, silently
+
+Every `http-api-v2` tool instance created in this workspace — whether by
+`nodes create` with `tools` inline or by a later `nodes update` — comes back
+carrying `appAccountName: "stefan-serper"`, an unrelated saved HTTP API account.
+It cannot be cleared: `appAccountName: null` and `""` both report
+`{"field":"tools","success":true}` and change nothing.
+
+Clay's own field help explains the mechanism — *"For secure headers like
+`X-API-KEY` or `Authorization`, use an HTTP API account to reuse them across
+enrichments"* — so an attached account can supply headers of its own. It did not
+turn out to be the cause of the failure above, and calls with an explicit
+`Authorization` header do reach OpenAI correctly. It is recorded because it is
+surprising, invisible unless you read `tools[0]` back, and would be the first
+suspect if these nodes ever start authenticating as something unexpected.
+
+### 13. A tool node accepts ONLY the action's own parameters — and violating it fails opaquely
+
+The published guidance says a property added to a tool node's `inputSchema`
+that is not a real action parameter is "silently dropped on save, so any
+`{{var}}` referencing it resolves to nothing". **That is not what happens here.**
+
+The property persists — `nodes get` shows it — and the action then throws at run
+time:
+
+```
+Tool execution failed with status: ERROR_ACTION_RUNTIME_ERROR
+```
+
+No HTTP status. No message. No parameter name. Empty outputs. The identical
+error text a malformed request body produces.
+
+Proof: the classifier node pinned `openai_api_key` alongside `body` and failed
+this way on every run. Removing that one property — changing nothing else, and
+deliberately leaving a dummy credential in place — turned the same call into a
+clean `401 error from the API`. One property was the whole difference between an
+opaque runtime failure and a normal HTTP response.
+
+So the Authorization header cannot be assembled from a pinned value on the HTTP
+node. Instead the code node upstream builds the complete `headers` object and
+the tool node maps `headers: { type: "reference", expression: "{{headers}}" }` —
+`headers` is a real action parameter, and a single-expression reference is
+type-preserving and passes the whole object through, dynamic keys included. The
+key still never touches this repository or a node's static config.
+
+`tests/static/clay_nodes.test.mjs` now fails the build if any `http-api-v2` node
+pins a property outside the action's parameter list.
+
+This cost roughly six runs to find, chasing the body, its size, the retry
+options, the timeout and an auto-attached account first. What would have found
+it in one: an `ERROR_ACTION_RUNTIME_ERROR` means *the action rejected its
+inputs*, so diff the node's resolved inputs against the action's parameter list
+before looking at anything else.
+
+### 14. No documented accessor for the run id inside a code node
 
 `event_id` is specified as the Clay row-run id and is the Path B dedupe key. A
 code node's `context` exposes no run id; it appears only inside the private
@@ -299,7 +356,7 @@ code node's `context` exposes no run id; it appears only inside the private
 `req-<request_id>`, which is unique per scoring request and dedupes exactly as
 well.
 
-### 14. The four website pages are guessed, not discovered
+### 15. The four website pages are guessed, not discovered
 
 `clay_table_spec.md` §5 names homepage, `/about`, `/product` and `/careers`.
 Node 04 constructs those four URLs from the domain, which is right often enough
@@ -337,10 +394,61 @@ this build rather than added untested.
 - **"Found nothing" and "never asked" are different facts**, and the jobs and
   news providers echo the domain on a clean no-data result. That echo is the
   ran-signal, so an empty window becomes `0` / `[]` rather than null.
-- **Run analysis is disabled for this workspace**, so `clay workflows analysis`
-  — the one surface that reports per-node credits — answers `auth_forbidden`.
-  Per-step credits here were measured with `clay workflows actions test`, whose
-  `metadata.upfrontCreditUsage` is exact.
+---
+
+## Credits: two currencies, and the CLI only shows one
+
+`docs/CLAY_AI4_2026_map/clay-credit-model-reference.md` in this repository is
+the source for this, compiled from Clay's own documentation in August. It
+matters because the obvious measurement — `clay credits balance` before and
+after a run — measures only half the bill, and I was about to report that half
+as the answer.
+
+| | **Actions** | **Data Credits** |
+|---|---|---|
+| Measures | orchestration on Clay | data and AI bought from providers |
+| Per enrichment | **always 1** | 0.5–10+, by data type |
+| Top-up | impossible; plan upgrade only | top-up or upgrade |
+| Rollover | none, expires with the cycle | yes, up to 2× the monthly limit |
+| `clay credits balance` | **not shown** | this is the number it returns |
+
+Two consequences for this build:
+
+1. **An HTTP API call consumes one Action.** All nine `http-api-v2` nodes here —
+   the eight OpenAI calls and the POST to n8n — cost an Action each, and
+   `clay credits balance` will not move for any of them.
+2. **Using your own API key eliminates the Data Credit cost, but still consumes
+   an Action.** Clay's wording. Measured and consistent: an OpenAI call through
+   `http-api-v2` comes back `isPrivateKey: true`, `totalCost: 0`. The token cost
+   is billed by OpenAI on the workspace's own key, and Clay never sees it —
+   "Clay will only show the Actions used, but not the AI token costs
+   themselves."
+
+So the honest per-run figure is **three numbers, not one**: Data Credits, Actions,
+and OpenAI tokens. Reporting the first alone would have understated a run badly,
+and reporting `delta=0` on a name-only run as "free" would have been wrong.
+
+Per-step Data Credits below are exact, from each action's own
+`metadata.upfrontCreditUsage.totalCost` via `clay workflows actions test`, not
+from catalog list prices.
+
+| Step | Action | Data Credits |
+|---|---|---|
+| 03 Enrich company profile | company profile lookup | 1 |
+| 06 Scrape site pages | website scrape × 4 pages | 4 |
+| 11 Enrich revenue and headcount | firmographic enrichment | 3 |
+| 12 Find financing events | financing events | 4 |
+| 13 Find open engineering roles | job openings | 1 |
+| 14 Find recent news | news events | 1 |
+| 09, 17–23, 27 | HTTP API × 9 | **0** (1 Action each) |
+| **Fully enriched company** | | **14** |
+| **Name-only request** | (no provider node is reached) | **0** |
+
+`clay workflows analysis` — the one surface that reports per-node credits
+directly — is **disabled for this workspace** and answers `auth_forbidden`. The
+UI route documented in the credit reference (Settings → Usage, and a table's
+Column view) remains available and is the place to check the real bill after a
+batch.
 
 ---
 

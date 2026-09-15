@@ -331,21 +331,23 @@ function openAiNode({ name, bodyFrom, bodyPath, after }) {
     spec: {
       nodeType: 'tool',
       name,
+      // ONLY the action's own parameters may appear here. A property of our own
+      // — `openai_api_key`, say — is not "silently dropped on save" as the docs
+      // state: it persists, and the action then throws
+      // ERROR_ACTION_RUNTIME_ERROR at run time with no status and no message.
+      // That cost several runs to find. The key rides inside `headers`, which
+      // IS an action parameter, built by the code node upstream.
       inputSchema: properties({
         body: pin(bodyFrom, bodyPath),
-        openai_api_key: pin('01 Prepare enrichment inputs', '$.openai_api_key'),
+        headers: pin(bodyFrom, '$.headers', 'object'),
       }),
       tools: tool(PKG.clay, 'http-api-v2', {
         method: fixed('POST'),
         url: fixed(OPENAI_URL),
         body: ref('{{body}}'),
-        headers: {
-          type: 'map',
-          entries: {
-            'Content-Type': fixed('application/json'),
-            Authorization: ref('Bearer {{openai_api_key}}'),
-          },
-        },
+        // A single-expression reference is type-preserving and passes the whole
+        // object, dynamic keys included.
+        headers: ref('{{headers}}'),
         // Retry the transient classes only: 429 and 5xx. A 400 means the
         // request is wrong (a bad schema, an unsupported parameter) and no
         // number of retries will fix it — it must surface.
@@ -380,7 +382,7 @@ const CLASSIFIER_CALLS = COMPONENTS.map(([component, title], i) => openAiNode({
 }));
 const LAST_CLASSIFIER = CLASSIFIER_CALLS[CLASSIFIER_CALLS.length - 1].name;
 
-const NODES = [
+export const NODES = [
   {
     name: '01 Prepare enrichment inputs',
     spec: {
@@ -513,6 +515,7 @@ const NODES = [
         page_text: pin('07 Collect page text', '$.page_text'),
         pages_reachable: pin('07 Collect page text', '$.pages_reachable'),
         company_name: pin('01 Prepare enrichment inputs', '$.company_name'),
+        openai_api_key: pin('01 Prepare enrichment inputs', '$.openai_api_key'),
       }),
       incomingEdges: [{ __from: '07 Collect page text' }],
     },
@@ -660,6 +663,7 @@ const NODES = [
       codeTimeoutMs: 30000,
       inputSchema: properties({
         facts_json: pin('15 Build facts_json', '$.facts_json'),
+        openai_api_key: pin('01 Prepare enrichment inputs', '$.openai_api_key'),
       }),
       incomingEdges: [{ __from: '15 Build facts_json' }],
     },
@@ -729,6 +733,7 @@ const NODES = [
       inputSchema: properties({
         url: pin('26 Build icp.scored event', '$.callback_url'),
         body: pin('26 Build icp.scored event', '$.event_json'),
+        headers: pin('26 Build icp.scored event', '$.headers', 'object'),
       }),
       tools: tool(PKG.clay, 'http-api-v2', {
         method: fixed('POST'),
@@ -736,17 +741,9 @@ const NODES = [
         // so DEV and production differ by payload, not by node config.
         url: ref('{{url}}'),
         body: ref('{{body}}'),
-        headers: {
-          type: 'map',
-          entries: {
-            'Content-Type': fixed('application/json'),
-            // The shared secret belongs in Clay's secret store, which has no
-            // CLI surface — see clay/WORKFLOW.md. This placeholder is
-            // deliberate: a real value here would be a secret committed to
-            // this repository.
-            'X-Clay-Secret': fixed('SET_IN_CLAY_UI'),
-          },
-        },
+        // Built by node 26 for the same reason as the OpenAI nodes: only the
+        // action's own parameters may be pinned onto a tool node.
+        headers: ref('{{headers}}'),
         // 3x on 5xx, never on 4xx (clay_table_spec.md section 9). A 4xx is n8n
         // rejecting the event as malformed or unauthorized; retrying cannot fix
         // either and must surface as a failed run.

@@ -3,10 +3,20 @@
 **Date:** 2026-09-09 · **Model version:** v5 · **Target:** DEV-complete by Mon 14 Sep, demo Tue 15 Sep
 
 **Status: DEV-complete on everything that does not need a credential or a
-human. 441 tests green. Nothing published, no credential in the repository.**
+human. 532 tests green from a fresh clone. Nothing published, no credential in
+the repository.**
 
 Read §1 first — one missing document, one Phase 0 finding, and one defect of
-mine that I shipped and have now fixed.
+mine that I shipped and have now fixed. §10 covers the Clay engine, which is
+built as a **Workflow** rather than a table and runs on an OpenAI-only model
+policy; `clay/WORKFLOW.md` is the detail, including fifteen places the
+Workflow primitive could not express `engine/clay_table_spec.md` as written.
+
+**The credential policy in §0 was superseded by the owner on 2026-09-09**
+("you have the keys and you use them yourself"). What did not change, and has
+not been relaxed since, is the part that matters: no key reaches git, a log, a
+report or a chat message. `npm run scan:secrets` is the gate and it runs as
+`posttest`.
 
 ---
 
@@ -576,6 +586,86 @@ Resolved by fetching the docs during the build:
 | `reports/coverage.md` delivered | **YES** — 2,000 orgs, four material findings |
 | `REPORT.md` complete with the three proofs and every flagged decision | **YES** |
 | Nothing published to production | **YES** — no credential used, nothing armed, `/publish` untouched |
+
+---
+
+## 10. The Clay engine, built as a Workflow
+
+`engine/clay_table_spec.md` specifies the engine as a Clay **table**. It is
+built as a Clay **Workflow** — same contract, different primitive — by
+`clay/build_workflow.mjs`, from this repository's prompts, schemas, rubric and
+Python scorer. 27 nodes. Nothing is published: the Path A trigger exists and is
+inert.
+
+**`clay/WORKFLOW.md` is the document to read.** It has the node map, the model
+policy, and fifteen numbered places where the Workflow primitive could not
+express the table spec as written. The three that a reviewer should care about
+most:
+
+1. **Temperature 0 is not available.** The rubric calls it non-negotiable. The
+   GPT-5.6 family answers `temperature: 0` with HTTP 400 — "Only the default (1)
+   value is supported" — and the o-series reasoning models on the same key do
+   not take temperature either. Requests pin `seed: 0` behind a closed strict
+   schema instead. That is weaker, the gap is open, and a static test fails the
+   build if `temperature` ever reappears in a request body.
+
+2. **A Clay code node has no network access**, so not one node in the graph is
+   a Claygent. `urllib` is not importable and `context.call_tool` does not exist
+   in the node runtime, which means every model call is an `http-api-v2` tool
+   node with a code node either side. That is what makes an OpenAI-only policy
+   possible at all inside Clay, and it is why the node count is 27 rather than
+   18.
+
+3. **`nodes update` with `inputSchema` and no `code` silently reverts a code
+   node's code**, and reports success. A graph can validate, run green, and
+   execute last week's logic. The builder sends body and wiring in one call and
+   then reads every node back and diffs it against this repository; that
+   read-back is the only actual proof, and it runs on every build.
+
+### What got better under the OpenAI policy
+
+A Clay agent node's `outputSchema` has no array type and no nullable number, so
+under a Claygent design `evidence` and `missing_inputs` had to travel as
+JSON-encoded strings and a level as a `select` containing the literal `"null"`.
+Against OpenAI strict mode they are real arrays and a real number-or-null.
+`scripts/gen_openai_schemas.mjs` derives the seven strict schemas from
+`config/rubric_v5.json`, and `tests/contract/openai_schemas.test.mjs` asserts
+they accept **exactly** what `classifier_output.schema.json` accepts, with one
+documented exception (`evidence`'s size limits, which strict mode cannot carry
+and node 24 truncates rather than trusting).
+
+### New tests
+
+| File | What it holds down |
+|---|---|
+| `tests/contract/openai_schemas.test.mjs` | The strict schemas are legal strict mode, generated not hand-edited, and accept exactly what the canonical schema accepts. |
+| `tests/static/clay_nodes.test.mjs` | Every handler parses; imports stay inside the Clay runtime's allow-list; the generated classifier node really contains the repository's prompts and schemas; no request sends `temperature`. |
+| `tests/contract/facts_node.test.mjs` + `tests/python/` | 25 cases over the node that decides what the classifiers see — nulls, revenue bands, funding coherence, "looked" vs "did not look", date arithmetic without `datetime`. |
+| `tests/contract/clay_capture.test.mjs` | Every captured fact set and `icp.scored` event is well-formed, and re-scoring the captured components through `engine/scoring.mjs` reproduces the score Clay's Python scorer produced — cross-implementation agreement on live data, not just generated inputs. |
+
+### Bugs this build found in itself
+
+- The builder embedded each strict schema as a JSON **string** rather than an
+  object, because its `read()` returns text and nothing parsed it. OpenAI
+  answered `ERROR_ACTION_RUNTIME_ERROR` after the enrichment above it had
+  already been paid for.
+- The JSON-to-Python conversion was **textual**, so it also rewrote the word
+  `null` inside the prompt prose: the preamble's "set `value` to `null`" became
+  "set `value` to `None`". A prompt that no longer matched
+  `engine/prompts/_preamble.md`, shipped green.
+- The funding **stage** and the funding **date** could come from different
+  rounds — "private_equity, 2023-04-12" — which reads as one coherent fact and
+  is not one.
+- Two revenue sources can disagree by 4x and the classifier could not see it,
+  so it could not apply the rule that says contradicting facts mean low
+  confidence.
+- The root `.gitignore` excludes `*.py`, so `engine/clay_score.py` was **never
+  committed**. The commit titled "Python port of the scorer" does not contain
+  the scorer. Same failure as the earlier `*.json` one, and the same fix: an
+  explicit allow-list, verified by cloning and running the suite.
+
+All five are fixed, and each is now caught offline by a test that fails when the
+fix is reverted.
 
 ---
 

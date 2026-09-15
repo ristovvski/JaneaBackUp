@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import {
-  classifierRequestCode, classifierPrompt, COMPONENTS, STRICT_SCHEMAS, MODELS,
+  classifierRequestCode, classifierPrompt, COMPONENTS, STRICT_SCHEMAS, MODELS, NODES,
 } from '../../clay/build_workflow.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -225,6 +225,48 @@ print(_json.dumps({"prompts": PROMPTS, "schemas": SCHEMAS}))
         assert.ok(classifierPrompt(component).length > 500, `${component}: prompt looks truncated`);
       }
     });
+  });
+
+  test('no tool node pins a property that is not an action parameter', () => {
+    // A tool node's inputSchema is NOT "silently dropped on save" when it
+    // carries a property of our own, whatever the docs say: the property
+    // persists and the action then throws ERROR_ACTION_RUNTIME_ERROR at run
+    // time, with no status, no message and no parameter name. The Authorization
+    // header therefore rides inside `headers`, which is a real action
+    // parameter, built by the code node upstream.
+    //
+    // HTTP_API_PARAMS is `clay workflows actions schema 4299091f-… http-api-v2`
+    // as of 2026-09-15.
+    const HTTP_API_PARAMS = new Set([
+      'method', 'url', 'queryString', 'body', 'headers', 'fieldPaths',
+      'removeNull', 'returnResponseMetadata', 'followRedirects',
+      'followRedirectsOptions', 'responseTimeout', 'shouldRetry', 'retryOptions',
+    ]);
+    for (const node of NODES) {
+      if (node.spec.nodeType !== 'tool') continue;
+      const action = node.spec.tools?.[0]?.actionKey;
+      if (action !== 'http-api-v2') continue;
+      for (const key of Object.keys(node.spec.inputSchema?.properties ?? {})) {
+        assert.ok(
+          HTTP_API_PARAMS.has(key.split('|')[0]),
+          `${node.spec.name} pins "${key}", which is not an http-api-v2 parameter — `
+          + 'the action will throw ERROR_ACTION_RUNTIME_ERROR at run time',
+        );
+      }
+    }
+  });
+
+  test('every OpenAI request body is built in a code node, never a static', () => {
+    // The key must not be a literal in a node's static config. Building the
+    // headers upstream keeps it in n8n's credential store and out of both this
+    // repository and the canvas.
+    for (const node of NODES) {
+      if (node.spec.nodeType !== 'tool') continue;
+      const mapping = node.spec.tools?.[0]?.inputMappingConfig ?? {};
+      if (mapping.url?.value !== 'https://api.openai.com/v1/chat/completions') continue;
+      assert.equal(mapping.headers?.type, 'reference', `${node.spec.name}: headers must be a reference`);
+      assert.equal(mapping.body?.type, 'reference', `${node.spec.name}: body must be a reference`);
+    }
   });
 
   test('08_build_summary_request.py still has its model marker', () => {

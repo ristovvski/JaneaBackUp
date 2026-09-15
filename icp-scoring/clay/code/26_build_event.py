@@ -82,6 +82,15 @@ def handler(context):
         # string rather than the object.
         "event_json": json.dumps(event, ensure_ascii=False),
         "callback_url": _text(context.get_input("callback_url")),
+        # Same reason as the OpenAI nodes: headers are built in a code node
+        # because a tool node's inputSchema takes only the action's own
+        # parameters. The shared secret is a placeholder until it is set in the
+        # Clay UI — Clay has no CLI-reachable secret store, and a real value
+        # here would be a secret in this repository.
+        "headers": {
+            "Content-Type": "application/json",
+            "X-Clay-Secret": "SET_IN_CLAY_UI",
+        },
         # Flattened onto the node output so the run trace is readable without
         # opening the payload.
         "grade": score.get("grade"),

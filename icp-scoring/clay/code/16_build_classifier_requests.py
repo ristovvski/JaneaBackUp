@@ -24,7 +24,19 @@ def handler(context):
     if not facts_json:
         raise ValueError("15 Build classifier requests: facts_json is empty — node 13 produced nothing")
 
-    out = {"model": MODEL, "components": list(PROMPTS.keys())}
+    # Built here, not pinned onto the HTTP nodes: a tool node's inputSchema
+    # accepts only the action's own parameters, and adding one of our own makes
+    # the action throw ERROR_ACTION_RUNTIME_ERROR at run time. `headers` is a
+    # real action parameter and a single-expression reference passes the whole
+    # object, so the key rides inside it. See clay/WORKFLOW.md.
+    out = {
+        "model": MODEL,
+        "components": list(PROMPTS.keys()),
+        "headers": {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer %s" % (context.get_input("openai_api_key") or ""),
+        },
+    }
     for component, prompt in PROMPTS.items():
         body = {
             "model": MODEL,

@@ -43,10 +43,22 @@ Rules:
 
 def handler(context):
     page_text = context.get_input("page_text")
+    # The Authorization header is built HERE, in a code node, rather than
+    # pinned onto the HTTP node. A tool node's inputSchema accepts only the
+    # action's own parameters: adding `openai_api_key` to it does not get
+    # "silently dropped" as the docs say, it makes the action throw
+    # ERROR_ACTION_RUNTIME_ERROR at run time with no further detail. `headers`
+    # IS an action parameter, and a single-expression reference passes a whole
+    # object through, so the key rides inside it. See clay/WORKFLOW.md.
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer %s" % (context.get_input("openai_api_key") or ""),
+    }
+
     if not page_text or not str(page_text).strip():
         # Nothing was scraped. Emit no request at all rather than paying for a
         # call that can only answer "there was no text".
-        return {"summary_request": None, "should_call": False}
+        return {"summary_request": None, "should_call": False, "headers": headers}
 
     body = {
         "model": MODEL,
@@ -67,4 +79,5 @@ def handler(context):
         "summary_request": json.dumps(body, ensure_ascii=False),
         "should_call": True,
         "model": MODEL,
+        "headers": headers,
     }
