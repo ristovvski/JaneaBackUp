@@ -38,6 +38,24 @@ def handler(context):
         if isinstance(raw, list):
             raw = raw[0] if raw else None
         text = _unwrap(raw)
-        if text:
-            return {"website_summary": text.strip()[:MAX_CHARS], "summary_ok": True}
-    return {"website_summary": None, "summary_ok": False}
+        if not text:
+            continue
+        # The reply is now a strict-schema object, not prose. Older runs and any
+        # non-JSON reply still work: the whole string becomes the summary.
+        try:
+            parsed = json.loads(text)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict) and isinstance(parsed.get("summary"), str):
+            openings = parsed.get("careers_lists_openings")
+            return {
+                "website_summary": parsed["summary"].strip()[:MAX_CHARS],
+                "careers_lists_openings": openings if openings in ("yes", "no", "unknown") else "unknown",
+                "summary_ok": True,
+            }
+        return {
+            "website_summary": text.strip()[:MAX_CHARS],
+            "careers_lists_openings": "unknown",
+            "summary_ok": True,
+        }
+    return {"website_summary": None, "careers_lists_openings": "unknown", "summary_ok": False}

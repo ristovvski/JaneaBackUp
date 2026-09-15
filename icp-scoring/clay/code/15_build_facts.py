@@ -457,11 +457,29 @@ def handler(context):
         facts["last_round_date"] = None
         facts["last_round_usd"] = None
 
-    # --- jobs (node 13) ----------------------------------------------------
+    # --- jobs (node 13, reconciled against the careers page) --------------
+    #
+    # A zero from the jobs provider is not the same as "this company is not
+    # hiring". On akuvo.com the provider returned no postings at all while the
+    # company's own /careers page invited candidates to explore open positions —
+    # and `open_eng_roles_count: 0` reads to stage_maturity as "mature steady
+    # state without acute pressure", which is level 3. Levels 7 and 10 both
+    # require a documented capacity gap, so a coverage hole in one provider
+    # silently caps the component.
+    #
+    # When the provider found nothing but the careers page says otherwise, the
+    # honest answer is null — we do not know — not zero. Null makes the
+    # classifier say so and name the missing input; zero makes it assert
+    # something false with confidence.
     jobs_ran = not _blank(context.get_input("jobs_domain"))
     open_eng, open_60d, senior = _summarize_jobs(
         _list(context.get_input("jobs")), today, jobs_ran,
     )
+    careers_contradicts = (
+        context.get_input("careers_lists_openings") == "yes" and open_eng == 0
+    )
+    if careers_contradicts:
+        open_eng = open_60d = senior = None
     facts["open_eng_roles_count"] = open_eng
     facts["eng_roles_open_60d_plus"] = open_60d
     facts["senior_eng_roles"] = senior
@@ -490,6 +508,10 @@ def handler(context):
         # Node 24 reads it and forces revenue_range to low confidence, so the
         # downgrade is a rule rather than something the prompt asks for.
         "revenue_conflict": facts_conflict,
+        # True when the jobs provider found nothing but the company's own
+        # careers page advertises openings, so the three job counts were set to
+        # null rather than zero.
+        "jobs_coverage_gap": careers_contradicts,
         # Read by the scoring node. These three are the only facts the rubric
         # itself reads (tier-2 detection); everything else reaches it through a
         # classifier.

@@ -641,6 +641,8 @@ export const NODES = [
         profile_annual_revenue: pin('03 Enrich company profile', '$.results[0].annual_revenue'),
 
         website_summary: pin('10 Read website summary', '$.website_summary'),
+        // Reconciles the jobs provider against the company's own careers page.
+        careers_lists_openings: pin('10 Read website summary', '$.careers_lists_openings'),
         website_pages_reachable: pin('07 Collect page text', '$.pages_reachable'),
 
         pdl_revenue: pin('11 Enrich revenue and headcount', '$.results[0].inferred_revenue'),

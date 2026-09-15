@@ -17,6 +17,37 @@ SYSTEM = (
     "you never add anything the pages do not say, and you never score or recommend."
 )
 
+# The summarizer also answers one structured question, because the jobs provider
+# cannot be trusted alone. On akuvo.com it returned zero open roles while the
+# company's own /careers page invited candidates to explore open positions —
+# and a zero there reads to stage_maturity as "no capacity pressure", which
+# dropped the component from 7/10 to 3. Asking the page directly gives node 15
+# something to reconcile the provider against.
+SUMMARY_SCHEMA = {
+    "name": "icp_v5_website_summary",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["summary", "careers_lists_openings"],
+        "properties": {
+            "summary": {
+                "type": "string",
+                "description": "Factual summary of the company from its own website, under 300 words.",
+            },
+            "careers_lists_openings": {
+                "enum": ["yes", "no", "unknown"],
+                "description": (
+                    "Does the careers page show or invite applications to open positions? "
+                    "'yes' if it lists roles or invites candidates to view openings; "
+                    "'no' if it states there are none; 'unknown' if the page was not "
+                    "reachable or does not say."
+                ),
+            },
+        },
+    },
+}
+
 INSTRUCTIONS = """Write a factual summary of {company} from the page text below.
 
 Cover, when the pages say it:
@@ -35,6 +66,8 @@ Rules:
 - Do not infer revenue, headcount or funding. Other enrichment supplies those.
 - Say plainly which pages were not reachable. Pages reachable: {reachable}.
 - Under 300 words. No marketing tone, no recommendation, no score.
+- Answer `careers_lists_openings` from the /careers page alone. If that page was
+  not reachable, the answer is `unknown` — never infer it from the homepage.
 
 ---
 
@@ -66,6 +99,7 @@ def handler(context):
         # temperature 0 outright ("Only the default (1) value is supported"),
         # so sending it would 400 the call. See clay/WORKFLOW.md.
         "seed": 0,
+        "response_format": {"type": "json_schema", "json_schema": SUMMARY_SCHEMA},
         "messages": [
             {"role": "system", "content": SYSTEM},
             {"role": "user", "content": INSTRUCTIONS.format(
