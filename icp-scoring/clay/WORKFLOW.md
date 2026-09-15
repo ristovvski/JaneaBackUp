@@ -310,46 +310,58 @@ turn out to be the cause of the failure above, and calls with an explicit
 surprising, invisible unless you read `tools[0]` back, and would be the first
 suspect if these nodes ever start authenticating as something unexpected.
 
-### 13. Two ways to wire a tool node that both fail with the same opaque error
+### 13. Three ways to wire a tool node that all fail with the same opaque error
 
 `ERROR_ACTION_RUNTIME_ERROR` — no HTTP status, no message, no parameter name,
-empty outputs — is what an `http-api-v2` node says for *every* input problem. It
-is also what it says for a malformed body, which is what sent the first
-debugging pass in the wrong direction entirely. Two distinct causes were found
-under it, and the rules that came out are:
+empty outputs — is what an `http-api-v2` node says for *every* input problem,
+including a malformed body. Three distinct causes were found under it, one at a
+time, each hidden behind the previous.
 
-**A property of your own in a tool node's `inputSchema` poisons the call.** The
-published guidance says such a property is "silently dropped on save, so any
-`{{var}}` referencing it resolves to nothing". It is not dropped. It persists —
-`nodes get` shows it — and the action throws. The classifier nodes pinned
-`openai_api_key` next to `body` and failed this way on every run; removing that
-one property, changing nothing else and deliberately leaving an invalid
-credential in place, turned the same call into a clean `401 error from the API`.
+**1. A property of your own in a tool node's `inputSchema` poisons the call.**
+The published guidance says such a property is "silently dropped on save, so any
+`{{var}}` referencing it resolves to nothing". It is not dropped — `nodes get`
+shows it — and the action throws. Pinning `openai_api_key` next to `body` failed
+on every run; removing that one property, changing nothing else and deliberately
+leaving an invalid credential in place, turned the same call into a clean
+`401 error from the API`.
 
-**An object-valued action parameter must be supplied by a PIN, never by a
-reference mapping.** With `headers` pinned from the code node upstream *and*
-mapped as `headers: { type: "reference", expression: "{{headers}}" }`, the
-action throws. Remove the mapping entry and leave only the pin, and the
-identical headers arrive intact and the call succeeds. The documented behaviour
-is the opposite — *"To pass an object an upstream node already produced, keep a
-single-expression reference — it is type-preserving and passes the whole
-object"* — and for this parameter it is not.
+**2. An object-valued parameter must be supplied by a PIN, never by a reference
+mapping.** With `headers` pinned from the code node upstream *and* mapped as
+`headers: { type: "reference", expression: "{{headers}}" }`, the action throws.
+Remove the mapping entry and leave only the pin, and the identical headers
+arrive intact. The documented behaviour is the opposite — *"a single-expression
+reference is type-preserving and passes the whole object"* — and for this
+parameter it is not.
 
-So: **string parameters by `inputMappingConfig` reference, object parameters by
-pin, and nothing in `inputSchema` that is not an action parameter.**
-`tests/static/clay_nodes.test.mjs` asserts all three on every `http-api-v2`
-node, because none of them is discoverable from a failing run.
+**3. A grouped parameter must be one `map` value, not pipe keys.**
+`retryOptions|maxRetries` is the documented way to address a grouped parameter
+and Clay accepts it at save time. The action then throws. The working form is
+`retryOptions: { type: "map", entries: { maxRetries: …, statusCodesToRetry: … } }`.
 
-Two process notes that cost more than the bugs did:
+So the recipe that works, and that `tests/static/clay_nodes.test.mjs` now
+asserts on every `http-api-v2` node:
 
-- **`clay workflows nodes test --source-run` reports
+| Parameter kind | How to supply it |
+|---|---|
+| string, from upstream (`body`) | pin in `inputSchema` + `reference` in the mapping |
+| object, from upstream (`headers`) | **pin only** — no mapping entry at all |
+| grouped (`retryOptions`) | one `map` value — never `parent\|child` keys |
+| fixed (`method`, `url`, `responseTimeout`) | `static` |
+| anything not an action parameter | **nowhere** — it must not appear in `inputSchema` |
+
+None of this is discoverable from a failing run, which is why all five rules are
+tests rather than comments.
+
+Two process notes that cost more than the bugs:
+
+- **`clay workflows nodes test --source-run` returns
   `ERROR_ACTION_RUNTIME_ERROR` whatever the node config is.** Several rounds of
-  bisecting through it produced "still fails" for configurations that were
-  actually correct, including the fix. Bisect with full `runs test` runs; on the
-  name-only input they cost zero Data Credits.
+  bisecting through it reported "still fails" for configurations that were in
+  fact correct, including two of the three fixes. Bisect with full
+  `runs test` runs instead; on the name-only input they cost zero Data Credits.
 - When an action fails, reproduce its exact resolved inputs through
-  `clay workflows actions test`. That path returns the real error, and it was
-  the only thing that ever showed one.
+  `clay workflows actions test`. That path returns the real error. It was the
+  only thing in this whole exercise that ever showed one.
 
 ### 14. No documented accessor for the run id inside a code node
 

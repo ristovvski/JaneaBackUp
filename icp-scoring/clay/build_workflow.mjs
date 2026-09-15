@@ -355,13 +355,22 @@ function openAiNode({ name, bodyFrom, bodyPath, after }) {
         // Retry the transient classes only: 429 and 5xx. A 400 means the
         // request is wrong (a bad schema, an unsupported parameter) and no
         // number of retries will fix it — it must surface.
+        //
+        // As a `map`, NOT as `retryOptions|maxRetries` pipe keys. Pipe keys are
+        // the documented way to address a grouped parameter, and Clay accepts
+        // them at save time — then the action throws
+        // ERROR_ACTION_RUNTIME_ERROR at run time. `retryOptions` is declared as
+        // one parameter and takes one object value.
         shouldRetry: fixed(true),
-        'retryOptions|maxRetries': fixed(3),
-        'retryOptions|statusCodesToRetry': fixed(['429', '500-599']),
-        // 90s. There is an undocumented ceiling somewhere between 90000 and
-        // 120000: `nodes update` accepts 120000 without complaint and the call
-        // then fails at run time with an opaque ERROR_ACTION_RUNTIME_ERROR and
-        // no HTTP status. Measured — see clay/WORKFLOW.md.
+        retryOptions: {
+          type: 'map',
+          entries: {
+            maxRetries: fixed(3),
+            statusCodesToRetry: fixed(['429', '500-599']),
+          },
+        },
+        // 90s. The ceiling is 100000ms, stated in the parameter's own
+        // description in `clay workflows actions schema`.
         responseTimeout: fixed(90000),
       }),
       incomingEdges: [{ __from: after }],
@@ -751,8 +760,13 @@ export const NODES = [
         // rejecting the event as malformed or unauthorized; retrying cannot fix
         // either and must surface as a failed run.
         shouldRetry: fixed(true),
-        'retryOptions|maxRetries': fixed(3),
-        'retryOptions|statusCodesToRetry': fixed(['500-599']),
+        retryOptions: {
+          type: 'map',
+          entries: {
+            maxRetries: fixed(3),
+            statusCodesToRetry: fixed(['500-599']),
+          },
+        },
       }),
       incomingEdges: [{ __from: '26 Build icp.scored event' }],
     },

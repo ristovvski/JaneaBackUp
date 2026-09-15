@@ -280,6 +280,22 @@ print(_json.dumps({"prompts": PROMPTS, "schemas": SCHEMAS}))
     }
   });
 
+  test('no tool node addresses a grouped parameter with pipe keys', () => {
+    // `retryOptions|maxRetries` is the documented way to address a grouped
+    // parameter and Clay accepts it at save time — then the action throws
+    // ERROR_ACTION_RUNTIME_ERROR at run time. The working form is one `map`
+    // value for `retryOptions`. Measured both ways.
+    for (const node of NODES) {
+      if (node.spec.nodeType !== 'tool') continue;
+      for (const key of Object.keys(node.spec.tools?.[0]?.inputMappingConfig ?? {})) {
+        assert.ok(
+          !key.includes('|'),
+          `${node.spec.name} maps "${key}" with a pipe key — use a single map value instead`,
+        );
+      }
+    }
+  });
+
   test('08_build_summary_request.py still has its model marker', () => {
     assert.match(readText('clay', 'code', '08_build_summary_request.py'), /@@SUMMARY_MODEL@@/);
   });
