@@ -82,14 +82,17 @@ def handler(context):
         # string rather than the object.
         "event_json": json.dumps(event, ensure_ascii=False),
         "callback_url": _text(context.get_input("callback_url")),
-        # Same reason as the OpenAI nodes: headers are built in a code node
-        # because a tool node's inputSchema takes only the action's own
-        # parameters. The shared secret is a placeholder until it is set in the
-        # Clay UI — Clay has no CLI-reachable secret store, and a real value
-        # here would be a secret in this repository.
+        # No X-Clay-Secret. Owner's ruling: the unguessable Path B webhook path
+        # IS the control, and a shared-secret header that has to live somewhere
+        # Clay can read it buys nothing on top of that — Clay has no
+        # CLI-reachable secret store, so the header would have been a literal in
+        # a node's config, which is a worse place for a secret than no secret.
+        #
+        # What the path being the credential actually requires: it never appears
+        # in this repository (it is read from ICP_WEBHOOK_PATH_B at build time),
+        # never in a log, and never in a run trace that leaves the workspace.
         "headers": {
             "Content-Type": "application/json",
-            "X-Clay-Secret": "SET_IN_CLAY_UI",
         },
         # Flattened onto the node output so the run trace is readable without
         # opening the payload.

@@ -231,17 +231,53 @@ tool nodes reference it as `Bearer {{openai_api_key}}`.
 `clay_table_spec.md`'s twelve — and it is flagged here rather than slipped in.
 What it buys: nothing in this repository, nothing in a node's static config.
 What it costs: the key appears in Clay run inputs for the life of the run
-record. If that is not acceptable, the alternative is pasting it into each
-node's `Authorization` header in the Clay UI, which trades run-record exposure
-for node-config exposure. There is no third option inside Clay today.
+record.
 
-### 8. The `X-Clay-Secret` value has the same problem
+Three other placements were tried and measured, all on 2026-09-15:
 
-`clay_table_spec.md` §9 puts the Path B shared secret in Clay's secret store.
-Same absence, and unlike the OpenAI key this one is not in the payload, so node
-27 carries the literal `SET_IN_CLAY_UI`. Deliberate: the alternative was a real
-secret in a file in this repository. Set it in the UI before Path B is anything
-but a DEV target.
+* **The header as node config.** `headers` supplied through the tool's
+  `inputMappingConfig` as `{"type":"map","entries":{"Authorization":{"type":
+  "static","value":"Bearer ..."}}}` — the same shape `retryOptions` uses and
+  that Clay accepts there — saves cleanly (`appliedUpdates:
+  [{"field":"tools","success":true}]`) and reads back intact, and is then
+  **dropped at run time**: OpenAI answered *"You didn't provide an API key"*,
+  the same reply as with no header at all. `headers` only reaches the request
+  when it is pinned through `inputSchema` from an upstream code node's output,
+  which is what the graph does. So node-config placement is not reachable from
+  the CLI at all.
+* **A dedicated HTTP API account.** This is the mechanism Clay's own field help
+  points at, and it is the right home for the key: the account holds the
+  `Authorization` header, so it never appears in a payload or a run record.
+  But `appAccountName` is read-only over the CLI — writing a value reports
+  `{"field":"tools","success":true}` and leaves the existing account in place
+  (gap 12). Creating the account and selecting it on a node are both UI actions.
+* **An n8n variable.** `$vars.OPENAI_API_KEY` would keep the key out of the n8n
+  node parameters as well as this repository. `POST /api/v1/variables` returns
+  **403 Forbidden** on this instance's plan, so there is no variable to read.
+
+The ranking, then: a Clay HTTP API account is the best placement and needs two
+UI actions (create it; select it on nodes 09 and 17-23). Until that exists, the
+key travels in the payload as described above. Doing that costs one n8n-side
+change — `BuildClayRequest` adding `openai_api_key` to the body — and the key
+has to be somewhere n8n can read it, which on this plan means a literal in the
+`POST Clay` node's `jsonBody` expression.
+
+### 8. Path B has no header auth — the unguessable path is the control
+
+Resolved by the owner rather than worked around: **no `X-Clay-Secret`.**
+
+The reasoning holds up. Clay has no CLI-reachable secret store and a code node
+cannot read an environment variable, so a shared-secret header would have had to
+be a literal in a node's static configuration. That is a worse place for a
+secret than having no secret at all, and it would have bought nothing on top of
+a webhook path nobody can guess.
+
+What that decision *does* require, and what this build holds to: the Path B path
+is a credential and is treated as one. It is read from `ICP_WEBHOOK_PATH_B` at
+build time, never committed (`n8n/workflows/*.json` is gitignored and the
+patcher rebuilds it), never logged, and never written into a run trace that
+leaves the workspace. `tests/static/` fails the build if a real path reaches the
+committed sources.
 
 ### 9. `nodes update` with `inputSchema` silently reverts `code`
 
@@ -300,7 +336,11 @@ Every `http-api-v2` tool instance created in this workspace — whether by
 `nodes create` with `tools` inline or by a later `nodes update` — comes back
 carrying `appAccountName: "stefan-serper"`, an unrelated saved HTTP API account.
 It cannot be cleared: `appAccountName: null` and `""` both report
-`{"field":"tools","success":true}` and change nothing.
+`{"field":"tools","success":true}` and change nothing. Nor can it be *set*:
+writing a name that does not exist in the workspace reports the same success
+and leaves `stefan-serper` in place. The field is read-only over the CLI in
+both directions, which is why gap 7 cannot reach the one placement that would
+be right for the OpenAI key.
 
 Clay's own field help explains the mechanism — *"For secure headers like
 `X-API-KEY` or `Authorization`, use an HTTP API account to reuse them across

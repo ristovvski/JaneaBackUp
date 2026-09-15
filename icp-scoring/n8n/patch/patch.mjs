@@ -88,7 +88,19 @@ function configExpression() {
     "return baked === undefined ? null : baked; }; " +
     `return { ${pairs}, now_iso: $now.toISO() }; })()`;
 
-  return `={{ JSON.stringify(Object.assign({}, ${JSON.stringify(CONFIG_STATIC)}, ${resolver})) }}`;
+  // n8n scans an expression for the FIRST "}}" and ends it there. CONFIG embeds
+  // the whole rubric as a JSON literal, and nested objects close with "}}" —
+  // e.g. `...investment"}},"vertical_tier":{`. That sequence silently
+  // terminated the expression 2749 characters in, so the Set node JSON-parsed a
+  // truncated string and the node failed at run time with "invalid syntax".
+  // Nothing catches that before a real execution: the workflow imports, the
+  // graph validates, and the expression looks right in the editor.
+  //
+  // Spacing the pair is enough — `} }` is identical JavaScript and no longer a
+  // delimiter. validate.mjs now fails the build if any "}}" survives inside an
+  // expression body.
+  const inner = `JSON.stringify(Object.assign({}, ${JSON.stringify(CONFIG_STATIC)}, ${resolver}))`;
+  return `={{ ${inner.replaceAll('}}', '} }')} }}`;
 }
 
 /** Which of the four instance values this build baked in. Reported, never printed. */

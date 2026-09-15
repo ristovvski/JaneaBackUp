@@ -205,6 +205,26 @@ export function validate(workflow, { nodesDir } = {}) {
       if (value.includes('{{') && !value.startsWith('=')) {
         push(`${path} contains "{{" but does not start with "=" — it would post literal braces`);
       }
+      // n8n ends an expression at the FIRST "}}". A nested one — which any
+      // embedded JSON object produces — truncates the expression silently: the
+      // workflow imports, the editor looks right, and the node fails at run
+      // time with an error from the JSON parser, not the expression engine.
+      // This cost a live execution to find (CONFIG, "invalid syntax").
+      // Only whole-string expressions ("={{ ... }}") are checked. A parameter
+      // like "=execution_id={{ a }} request_id={{ b }}" is legal n8n: several
+      // expressions interleaved with literal text, and its second "}}" is a
+      // closing delimiter, not a nested one.
+      //
+      // For a whole-string expression the test is exact: the first "}}" after
+      // the opening must BE the closing one. If anything follows it, n8n closed
+      // the expression early and the remainder is literal text.
+      if (value.startsWith('={{') && value.trimEnd().endsWith('}}')) {
+        const first = value.indexOf('}}', 3);
+        if (first !== -1 && first !== value.trimEnd().length - 2) {
+          push(`${path} has "}}" inside the expression body at offset ${first} — n8n closes the `
+             + 'expression there and the rest becomes literal text (write "} }" instead)');
+        }
+      }
     } else if (Array.isArray(value)) {
       value.forEach((v, i) => walk(v, `${path}[${i}]`));
     } else if (value && typeof value === 'object') {
