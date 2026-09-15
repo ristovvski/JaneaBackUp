@@ -227,7 +227,8 @@ describe('CONFIG is first, and holds everything', () => {
 
   test('the CONFIG payload is exactly what gen_config_node produces', () => {
     const expression = byName.get('CONFIG').parameters.jsonOutput;
-    const match = expression.match(/Object\.assign\(\{\}, (\{.*\}), \{ /);
+    // ={{ JSON.stringify(Object.assign({}, <STATIC>, (() => { ... })())) }}
+    const match = expression.match(/Object\.assign\(\{\}, (\{.*\}), \(\(\) => \{/);
     assert.ok(match, 'cannot find the static payload inside the CONFIG expression');
     assert.deepEqual(
       JSON.parse(match[1]), buildConfig(),
@@ -236,13 +237,40 @@ describe('CONFIG is first, and holds everything', () => {
     );
   });
 
-  test('the four environment-specific values come from $env, never a literal', () => {
+  test('the four instance-specific values are resolved, never literals', () => {
     const expression = byName.get('CONFIG').parameters.jsonOutput;
     for (const [key, envKey] of Object.entries(ENV_KEYS)) {
-      assert.ok(expression.includes(`${key}: $env.${envKey}`), `${key} must come from $env.${envKey}`);
+      assert.ok(
+        expression.includes(`${key}: pick('${envKey}', BAKED.${key})`),
+        `${key} must resolve ${envKey} with a baked fallback`
+      );
     }
-    // A Clay webhook URL is an unguessable endpoint, i.e. a secret.
-    assert.ok(!/hooks\.clay\.com|api\.clay\.com/.test(raw), 'no literal Clay URL in the export');
+    // $vars first (n8n Cloud), $env second (self-hosted), each guarded so a
+    // blocked accessor cannot throw and fail the whole execution.
+    assert.ok(expression.includes("typeof $vars !== 'undefined'"), 'must try $vars');
+    assert.ok(expression.includes("typeof $env !== 'undefined'"), 'must fall back to $env');
+    assert.equal((expression.match(/try \{/g) || []).length, 2, 'both lookups guarded');
+    assert.ok(expression.includes('const BAKED ='), 'must carry a build-time fallback');
+
+    // A Clay webhook URL is an unguessable endpoint, i.e. a secret. A build
+    // with ICP_CLAY_WEBHOOK_URL set legitimately bakes it into the GITIGNORED
+    // export; a build without it must contain no trace.
+    if (!process.env.ICP_CLAY_WEBHOOK_URL) {
+      assert.ok(!/api\.clay\.com|hooks\.clay\.com/.test(raw), 'no literal Clay URL in a placeholder build');
+    }
+  });
+
+  test('whatever the build bakes in, it never reaches a tracked file', () => {
+    // The export is gitignored; this asserts the rule rather than trusting it.
+    let tracked = true;
+    try {
+      execFileSync('git', ['ls-files', '--error-unmatch', 'n8n/workflows/WF-ICP-Score.dev.json'],
+        { cwd: ROOT, stdio: 'pipe' });
+    } catch { tracked = false; }
+    assert.equal(tracked, false);
+    const committedConfig = readFileSync(join(ROOT, 'n8n', 'nodes', 'CONFIG.json'), 'utf8');
+    assert.ok(!/api\.clay\.com|app\.n8n\.cloud/.test(committedConfig),
+      'the committed CONFIG must carry no instance-specific URL');
   });
 
   test('now_iso is minted once in CONFIG, so one execution agrees on "now"', () => {

@@ -520,6 +520,7 @@ Where the published docs are silent, the code stops rather than guessing.
 
 | # | What | Status |
 |---|---|---|
+| 0 | **How an n8n Cloud workflow reads an instance secret** | **Resolved by measurement, 2026-09-15.** `GET /variables` 200, `POST /variables` **403** — readable, not writable on this plan; and Cloud blocks `$env`. CONFIG now resolves `$vars` → `$env` → a value baked at build time, each guarded because a *blocked* accessor throws rather than returning undefined. Layer 3 is what delivers on this instance. |
 | 1 | **Clay's formula-column reference syntax** for another column | **Unresolved.** Not reproduced in `clay_formula.txt`. The file marks the seven bindings as the only hand-edited lines; STEP 3 is pasted unchanged and is what the parity test covers. |
 | 2 | **Enum option ids in the `organizationFields` create response** | **Unresolved by docs** — "The documentation doesn't explicitly state whether response options include numeric IDs." §8.2 requires writing enums by option id, so `create_fields` reads `options[].id` back and **fails with `NEEDS_DOC_EVIDENCE`** if absent. `BuildOrgPatch` throws `IcpMissingOptionId` rather than writing a label. |
 | 3 | **Google Sheets node `columns` sub-shape (v4.5)** | **Assumption, verifiable on import.** Uses the documented `mappingMode: "autoMapInputData"`. A wrong parameter surfaces immediately on import; the runbook's step 5 checklist calls it out. `validate.mjs` cannot check it offline. |

@@ -51,19 +51,50 @@ export const ENV_BINDINGS = {
 };
 
 /**
- * The CONFIG Set node's jsonOutput: the static payload, plus the env-sourced
- * values, plus now_iso. now_iso is in CONFIG rather than read as $now inside
- * each node so that every node in one execution agrees on "now" — a run that
- * straddles midnight must not write one date and gate on another — and so the
- * node tests can pin it.
+ * The CONFIG Set node's jsonOutput: the static payload, plus the four
+ * instance-specific values, plus now_iso.
+ *
+ * now_iso lives here rather than being read as $now inside each node so that
+ * every node in one execution agrees on "now" — a run that straddles midnight
+ * must not gate on one date and write another — and so the node tests can pin
+ * it.
+ *
+ * The four secrets are resolved from $vars FIRST, then $env. n8n Cloud blocks
+ * $env by default (N8N_BLOCK_ENV_ACCESS_IN_NODE) and exposes Variables
+ * instead; self-hosted instances usually have $env and may have no Variables
+ * at all. Reading a blocked accessor THROWS rather than returning undefined,
+ * so each lookup is wrapped — otherwise CONFIG fails the whole execution on
+ * the instance type it was not written for. Supporting both removes the guess.
  */
 function configExpression() {
-  const envPairs = Object.entries(ENV_BINDINGS)
-    .map(([key, envKey]) => `${key}: $env.${envKey}`)
+  // Third layer: a value baked in at BUILD time from the builder's environment.
+  // n8n Cloud blocks $env AND refuses Variable writes over the API (403), so on
+  // Cloud the baked value is the only one that arrives. It lands only in the
+  // gitignored export — SECURITY.md's "the real values live in n8n" — never in
+  // a tracked file.
+  const baked = {};
+  for (const [key, envKey] of Object.entries(ENV_BINDINGS)) {
+    baked[key] = process.env[envKey] || null;
+  }
+
+  const pairs = Object.entries(ENV_BINDINGS)
+    .map(([key, envKey]) => `${key}: pick('${envKey}', BAKED.${key})`)
     .join(', ');
-  return `={{ JSON.stringify(Object.assign({}, ${JSON.stringify(CONFIG_STATIC)}, ` +
-         `{ ${envPairs}, now_iso: $now.toISO() })) }}`;
+
+  const resolver =
+    `(() => { const BAKED = ${JSON.stringify(baked)}; const pick = (n, baked) => { ` +
+    "try { if (typeof $vars !== 'undefined' && $vars && $vars[n]) return $vars[n]; } catch (e) {} " +
+    "try { if (typeof $env !== 'undefined' && $env && $env[n]) return $env[n]; } catch (e) {} " +
+    "return baked === undefined ? null : baked; }; " +
+    `return { ${pairs}, now_iso: $now.toISO() }; })()`;
+
+  return `={{ JSON.stringify(Object.assign({}, ${JSON.stringify(CONFIG_STATIC)}, ${resolver})) }}`;
 }
+
+/** Which of the four instance values this build baked in. Reported, never printed. */
+export const BAKED_KEYS = Object.entries(ENV_BINDINGS)
+  .filter(([, envKey]) => Boolean(process.env[envKey]))
+  .map(([key]) => key);
 
 // ---------------------------------------------------------------------------
 // Node factories. Every id/key/option comes from CONFIG at runtime; nothing
@@ -587,6 +618,7 @@ if (isMain) {
     `  credentials in import payload:   0 (stripped)\n` +
     `  webhook paths: ${USING_PLACEHOLDER_PATHS ? 'PLACEHOLDER — set ICP_WEBHOOK_PATH_A/B for a real import' : 'from ICP_WEBHOOK_PATH_A/B'}\n` +
     `  CONFIG source: ${CONFIG_IS_LIVE ? 'CONFIG.local.json (LIVE field keys)' : 'CONFIG.json (placeholders)'}\n` +
+    `  baked at build: ${BAKED_KEYS.length ? BAKED_KEYS.join(', ') : '(none — runtime $vars/$env only)'}\n` +
     `  validate(): clean\n`
   );
   if (USING_PLACEHOLDER_PATHS) {

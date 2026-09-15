@@ -104,10 +104,27 @@ ICP_AUDIT_SHEET_ID      the ICP_Audit spreadsheet id
 ICP_SLACK_CHANNEL       the channel id, e.g. the id of #gtm-ops-dev
 ```
 
-> **If `$env` returns nothing**, the instance has
-> `N8N_BLOCK_ENV_ACCESS_IN_NODE=true`. CONFIG will produce `undefined` for all
-> four and the Clay POST will fail with an invalid URL. Set it to `false`, or
-> move the four values into a credential.
+CONFIG resolves each of the four **three ways, in order**, so the same export
+works on Cloud and self-hosted without being told which it is:
+
+1. **`$vars.NAME`** — n8n Variables. Preferred: changing a value is a UI edit,
+   no rebuild.
+2. **`$env.NAME`** — self-hosted instances with
+   `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`.
+3. **baked at build time** — whatever `ICP_*` was set in the shell that ran
+   `node n8n/patch/patch.mjs`. Lands only in the gitignored export.
+
+Each lookup is wrapped in its own `try`, because a **blocked** accessor
+*throws* rather than returning undefined — one unguarded `$env` read fails the
+entire execution on an instance that blocks it.
+
+> **On this instance (n8n Cloud, `janea-systems-2025`): `GET /variables`
+> returns 200 but `POST /variables` returns 403.** Variables are readable and
+> not writable on this plan, so layer 1 cannot be populated over the API and
+> layer 2 is blocked on Cloud. **Layer 3 is what actually delivers the values
+> here** — rebuild with the `ICP_*` variables exported, then PUT the workflow.
+> If someone later creates the Variables by hand in the UI, they silently take
+> precedence and no rebuild is needed.
 
 ### 5. Build and import the workflow
 
