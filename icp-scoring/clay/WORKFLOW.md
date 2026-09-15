@@ -406,6 +406,28 @@ this build rather than added untested.
   reading an evidence line sees exactly how precise the number behind a grade
   is. This is not the headcount-derived revenue the prompt forbids; it is the
   provider's own estimate, expressed less precisely than a scalar.
+- **The two revenue providers disagree, and the inferred one looks high on small
+  companies.** On `akuvo.com` they answered:
+
+  | Provider | Field | Value | Employees | Revenue / employee |
+  |---|---|---|---|---|
+  | firmographic (primary) | `inferred_revenue` | `$50M-$100M` | 87 | ~$833k |
+  | company profile lookup | `annual_revenue` | `10M-25M` | 92 | ~$194k |
+
+  Akuvo was founded in 2019 and has raised $13.0M in total. ~$194k of revenue
+  per employee is ordinary for B2B SaaS; ~$833k would be top-decile, on $13M
+  raised, with 90 people. The lower band is the more plausible of the two, and
+  the primary provider's field is named `inferred_revenue` — it is a model's
+  estimate, not a reported figure.
+
+  **It does not change Akuvo's grade**, which is A on either number (83 on the
+  high band, 75 on the low — and 75 is exactly the A threshold). What it would
+  change is every borderline company: a provider that reads high on small
+  companies pushes B into A across the CRM, systematically and invisibly. The
+  primary is `NEEDS_DECISION #9`'s default, not a finding of this build, so it
+  is flagged here rather than swapped. Swapping it is a one-line change in
+  `clay/code/15_build_facts.py`.
+
 - **"Found nothing" and "never asked" are different facts**, and the jobs and
   news providers echo the domain on a clean no-data result. That echo is the
   ran-signal, so an empty window becomes `0` / `[]` rather than null.
