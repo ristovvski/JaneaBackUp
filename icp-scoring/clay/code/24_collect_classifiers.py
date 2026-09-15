@@ -93,8 +93,29 @@ def handler(context):
             failed.append(name)
         components[name] = _component(name, parsed)
 
+    # --- the revenue conflict downgrade ----------------------------------
+    #
+    # When the two revenue providers landed two or more bands apart, node 15
+    # took the lower figure and set this flag. The classifier is TOLD about the
+    # conflict — it is spelled out in `revenue_source`, which every prompt
+    # instructs the model to cite — but being told is not the same as being
+    # bound. A model that reads the conflict and still answers "high" would put
+    # a confident number behind a figure two providers cannot agree on, and
+    # revenue_range gates the whole score.
+    #
+    # So the downgrade happens here, in code, unconditionally. The evidence line
+    # says why, so the reason survives into the Pipedrive note and the audit row
+    # rather than looking like an unexplained low.
+    if context.get_input("revenue_conflict") is True:
+        entry = components["revenue_range"]
+        entry["confidence"] = "low"
+        note = "revenue_source: providers 2+ bands apart, lower band taken"
+        if note not in entry["evidence"]:
+            entry["evidence"] = ([note] + entry["evidence"])[:MAX_EVIDENCE_ITEMS]
+
     return {
         "components": components,
         "classifiers_failed": ",".join(failed) if failed else "",
         "classifiers_ok": len(COMPONENTS) - len(failed),
+        "revenue_downgraded": context.get_input("revenue_conflict") is True,
     }

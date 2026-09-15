@@ -110,6 +110,39 @@ def _scalar(token):
         return None
 
 
+# The band ladder. Two providers "disagreeing" needs a unit, and the natural one
+# is not a ratio — it is how many standard revenue brackets apart they land. A
+# ladder makes "two bands apart" mean the same thing at $10M and at $10B, which
+# a ratio does not.
+_BANDS = [
+    (1e6, "<$1M"), (1e7, "$1M-$10M"), (2.5e7, "$10M-$25M"), (5e7, "$25M-$50M"),
+    (1e8, "$50M-$100M"), (2.5e8, "$100M-$250M"), (5e8, "$250M-$500M"),
+    (1e9, "$500M-$1B"), (1e10, "$1B-$10B"), (1e11, "$10B-$100B"),
+]
+
+# Two or more bands apart is the threshold at which the lower figure is taken
+# rather than the primary provider's. One band apart is ordinary provider noise
+# and the primary still wins.
+_CONFLICT_BANDS = 2
+
+
+def _band_index(usd):
+    """Which bracket a figure falls in. The top band is open-ended."""
+    if usd is None:
+        return None
+    for index, (ceiling, _label) in enumerate(_BANDS):
+        if usd < ceiling:
+            return index
+    return len(_BANDS)
+
+
+def _band_label(usd):
+    index = _band_index(usd)
+    if index is None:
+        return None
+    return _BANDS[index][1] if index < len(_BANDS) else ">$100B"
+
+
 def _revenue(value):
     """(usd, band_text). `usd` is the midpoint for a band, the value for a scalar."""
     if _blank(value):
@@ -317,20 +350,56 @@ def handler(context):
     # profile lookup's band is the fallback. Whichever wins, `revenue_source`
     # names it, and carries the band text when the figure came from one — so a
     # reviewer can see how precise the number behind a grade actually is.
+    # ---------------------------------------------------------------------
+    # Revenue, and what to do when the two providers disagree
+    #
+    # The primary stays primary. But its field is named `inferred_revenue` — a
+    # model's estimate, not a reported figure — and on akuvo.com it read two
+    # bands above the company profile lookup ($50M-$100M against $10M-$25M) on a
+    # company with 90 people, founded 2019, $13M raised. The lower band was the
+    # plausible one.
+    #
+    # So: one band apart is provider noise and the primary wins. TWO OR MORE
+    # bands apart is a real disagreement, and the LOWER figure is taken. A
+    # provider that reads high on small companies otherwise pushes borderline
+    # accounts from B to A across the whole CRM, quietly, and the A threshold
+    # has no margin underneath it.
+    #
+    # `revenue_conflict` travels downstream, where node 24 forces
+    # revenue_range's confidence to low. Leaving that to the prompt would make
+    # a rule out of a request.
+    # ---------------------------------------------------------------------
     pdl_revenue, pdl_band = _revenue(context.get_input("pdl_revenue"))
     profile_revenue, profile_band = _revenue(context.get_input("profile_annual_revenue"))
+    facts_conflict = False
+
     if pdl_revenue is not None:
-        facts["revenue_estimate_usd"] = pdl_revenue
-        source = "Firmographic enrichment (inferred)" + (' (band "%s")' % pdl_band if pdl_band else "")
-        # When both providers answered and they disagree by more than 2x, say so
-        # in the source line. revenue_range is a gating component, and the
-        # preamble tells the classifier that two facts contradicting each other
-        # is low confidence — it can only apply that rule if it can SEE the
-        # contradiction, and the closed schema has nowhere else to put it.
-        if profile_revenue is not None and max(pdl_revenue, profile_revenue) > 2 * min(pdl_revenue, profile_revenue):
-            source += "; company profile lookup disagrees%s" % (
+        chosen, source = pdl_revenue, "Firmographic enrichment (inferred)"
+        if pdl_band:
+            source += ' (band "%s")' % pdl_band
+
+        if profile_revenue is not None:
+            gap = abs(_band_index(pdl_revenue) - _band_index(profile_revenue))
+            other = "company profile lookup" + (
                 ' (band "%s")' % profile_band if profile_band else " (%s)" % profile_revenue
             )
+            if gap >= _CONFLICT_BANDS:
+                facts_conflict = True
+                chosen = min(pdl_revenue, profile_revenue)
+                source = (
+                    "CONFLICT: firmographic enrichment (inferred)%s and %s are %d bands apart; "
+                    "taking the lower figure (%s) and treating revenue as low confidence"
+                    % (
+                        ' (band "%s")' % pdl_band if pdl_band else "",
+                        other,
+                        gap,
+                        _band_label(chosen),
+                    )
+                )
+            elif gap == 1:
+                source += "; %s disagrees by one band" % other
+
+        facts["revenue_estimate_usd"] = chosen
         facts["revenue_source"] = source
     elif profile_revenue is not None:
         facts["revenue_estimate_usd"] = profile_revenue
@@ -417,6 +486,10 @@ def handler(context):
         # The classifier prompts interpolate a string, not an object — an agent
         # prompt has no way to render a nested dict faithfully.
         "facts_json": json.dumps(ordered, ensure_ascii=False, indent=2, sort_keys=False),
+        # Set when the two revenue providers landed two or more bands apart.
+        # Node 24 reads it and forces revenue_range to low confidence, so the
+        # downgrade is a rule rather than something the prompt asks for.
+        "revenue_conflict": facts_conflict,
         # Read by the scoring node. These three are the only facts the rubric
         # itself reads (tier-2 detection); everything else reaches it through a
         # classifier.

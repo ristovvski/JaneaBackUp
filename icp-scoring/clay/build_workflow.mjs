@@ -690,12 +690,17 @@ export const NODES = [
       nodeType: 'code',
       name: '24 Collect classifier outputs',
       code: read('clay/code/24_collect_classifiers.py'),
-      inputSchema: properties(Object.fromEntries(
-        COMPONENTS.map(([component, title], i) => [
-          `reply_${component}`,
-          pin(`${17 + i} Classify ${title}`, '$.result', 'object'),
-        ]),
-      )),
+      inputSchema: properties({
+        ...Object.fromEntries(
+          COMPONENTS.map(([component, title], i) => [
+            `reply_${component}`,
+            pin(`${17 + i} Classify ${title}`, '$.result', 'object'),
+          ]),
+        ),
+        // Set by node 15 when the two revenue providers landed two or more
+        // bands apart. Node 24 forces revenue_range to low confidence on it.
+        revenue_conflict: pin('15 Build facts_json', '$.revenue_conflict', 'boolean'),
+      }),
       incomingEdges: [{ __from: LAST_CLASSIFIER }],
     },
   },
