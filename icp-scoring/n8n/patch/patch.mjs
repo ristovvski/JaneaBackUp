@@ -206,13 +206,21 @@ const httpNode = (name, position, params, extra = {}) => ({
   ...extra,
 });
 
-const slackNode = (name, position, text, extra = {}) => ({
+// Which CONFIG node an expression may reference depends on the path the node
+// sits on. n8n resolves `$('X')` only when X is CONNECTED upstream of the node
+// doing the referencing; Path B's nodes have CONFIG B upstream and CONFIG
+// nowhere, so a Path B expression naming CONFIG fails at run time with an
+// error whose own message is then lost (see n8n/nodes/Dedupe.js). One helper,
+// one argument, no literals.
+const cfgRef = (path) => (path === 'B' ? "$('CONFIG B')" : "$('CONFIG')");
+
+const slackNode = (name, position, path, text, extra = {}) => ({
   parameters: {
     resource: 'message',
     operation: 'post',
     select: 'channel',
     // Driven from CONFIG, never a literal channel id.
-    channelId: { __rl: true, value: "={{ $('CONFIG').item.json.slack_channel_ops }}", mode: 'id' },
+    channelId: { __rl: true, value: `={{ ${cfgRef(path)}.item.json.slack_channel_ops }}`, mode: 'id' },
     text,
     otherOptions: {},
   },
@@ -242,10 +250,16 @@ export function buildWorkflow() {
     parameters: {
       httpMethod: 'POST',
       path: WEBHOOK_PATH_A,
-      // Pipedrive supports HTTP basic auth on the subscription
-      // (http_auth_user / http_auth_password), so the endpoint is
-      // authenticated rather than merely unguessable.
-      authentication: 'basicAuth',
+      // Pipedrive can put HTTP basic auth on the subscription
+      // (http_auth_user / http_auth_password), and that is the better control
+      // if the pair is ever set. It is not set on subscription 3167529, and an
+      // n8n webhook with `authentication` set but no credential attached
+      // answers every delivery with 500 "No authentication data defined on
+      // node!" — so the node says 'none' and the unguessable path carries it,
+      // the same control Path B runs on. Turning it back on means creating the
+      // httpBasicAuth credential AND re-registering the subscription with the
+      // matching pair; one without the other breaks the trigger silently.
+      authentication: 'none',
       responseMode: 'responseNode',
       options: {},
     },
@@ -255,7 +269,6 @@ export function buildWorkflow() {
     typeVersion: 2,
     position: [-260, 200],
     webhookId: WEBHOOK_PATH_A,
-    credentials: { httpBasicAuth: { id: 'icp_webhook_basic', name: 'icp_webhook_basic' } },
   });
 
   nodes.push({
@@ -321,6 +334,7 @@ export function buildWorkflow() {
   nodes.push(slackNode(
     'Slack warn rate',
     [740, -100],
+    'A',
     '=:warning: ICP scoring trigger volume is unusually high: ' +
     "{{ $json._rate_this_hour }} events this hour (limit {{ $('CONFIG').item.json.max_events_per_hour }}). " +
     'A bulk import can burn Clay credits fast. ' +
@@ -333,8 +347,13 @@ export function buildWorkflow() {
     parameters: {
       httpMethod: 'POST',
       path: WEBHOOK_PATH_B,
-      // Header auth: X-Clay-Secret, held in the clay_webhook_secret credential.
-      authentication: 'headerAuth',
+      // No header auth. The owner's ruling: the unguessable path IS the
+      // credential, and a shared secret would have had to live as a literal in
+      // a Clay node's config, which is a worse place for one than nowhere.
+      // n8n treats `authentication` set with no credential attached as a hard
+      // 500 on every delivery ("No authentication data defined on node!"), so
+      // this has to say 'none' rather than simply be omitted.
+      authentication: 'none',
       responseMode: 'responseNode',
       options: {},
     },
@@ -344,7 +363,6 @@ export function buildWorkflow() {
     typeVersion: 2,
     position: [-260, 700],
     webhookId: WEBHOOK_PATH_B,
-    credentials: { httpHeaderAuth: { id: 'clay_webhook_secret', name: 'clay_webhook_secret' } },
   });
 
   nodes.push({
@@ -408,7 +426,7 @@ export function buildWorkflow() {
     parameters: {
       resource: 'sheet',
       operation: 'append',
-      documentId: { __rl: true, value: "={{ $('CONFIG').item.json.audit_sheet_id }}", mode: 'id' },
+      documentId: { __rl: true, value: `={{ ${cfgRef('B')}.item.json.audit_sheet_id }}`, mode: 'id' },
       sheetName: { __rl: true, value: 'ICP_Audit', mode: 'name' },
       // autoMapInputData maps the incoming keys onto the sheet's header row by
       // name, which is why BuildAuditRow emits its keys in §8.4 order.
@@ -433,6 +451,7 @@ export function buildWorkflow() {
   nodes.push(slackNode(
     'Slack alert error',
     [1140, 900],
+    'B',
     '=:rotating_light: ICP scoring failed. ' +
     'org_id={{ $json.org_id }} request_id={{ $json.request_id }} ' +
     'execution_id={{ $execution.id }} ' +
@@ -457,8 +476,8 @@ export function buildWorkflow() {
     specifyBody: 'json',
     jsonBody:
       '={{ JSON.stringify({ org_id: Number($json.org_id), content: ' +
-      "'ICP ' + $('CONFIG').item.json.model_version + ' — Calculated: ' + " +
-      "$('CONFIG').item.json.label_error + '\\n' + " +
+      `'ICP ' + ${cfgRef('B')}.item.json.model_version + ' — Calculated: ' + ` +
+      `${cfgRef('B')}.item.json.label_error + '\\n' + ` +
       "'Reason: ' + $json.error_name + ': ' + $json.error_message + '\\n' + " +
       "'request_id ' + ($json.request_id || 'n/a') + ' · execution_id ' + $execution.id" +
       ' }) }}',

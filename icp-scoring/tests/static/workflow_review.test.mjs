@@ -330,9 +330,11 @@ describe('no literal ids or secrets outside CONFIG', () => {
         seen.add(credential.name);
       }
     }
+    // No clay_webhook_secret and no icp_webhook_basic: both webhooks run on
+    // the unguessable path as their only control, so neither carries one.
     assert.deepEqual(
       [...seen].sort(),
-      ['clay_webhook_secret', 'gsheets_audit', 'icp_webhook_basic', 'pipedrive_main', 'slack_ops']
+      ['gsheets_audit', 'pipedrive_main', 'slack_ops']
     );
   });
 });
@@ -366,27 +368,31 @@ describe('retry semantics', () => {
   });
 });
 
-describe('webhooks are authenticated', () => {
-  test('both webhook nodes declare authentication and a credential', () => {
+describe('webhooks carry no half-configured authentication', () => {
+  // The owner's ruling is that the unguessable path is the control on Path B,
+  // and Path A's Pipedrive subscription carries no basic-auth pair. What this
+  // suite guards is the failure mode in between: `authentication` set to a
+  // scheme with no credential attached is not a weaker control, it is a dead
+  // endpoint — n8n answers every delivery with 500 "No authentication data
+  // defined on node!" and the trigger looks registered while firing nothing.
+  test('a declared scheme always comes with a credential', () => {
     const webhooks = wf.nodes.filter((n) => n.type === 'n8n-nodes-base.webhook');
     assert.equal(webhooks.length, 2);
     for (const node of webhooks) {
-      assert.ok(node.parameters.authentication, `${node.name} has no authentication`);
-      assert.notEqual(node.parameters.authentication, 'none');
-      assert.ok(Object.keys(node.credentials || {}).length > 0, `${node.name} has no credential`);
+      const scheme = node.parameters.authentication;
+      assert.ok(scheme, `${node.name} must state a scheme, even if it is 'none'`);
+      if (scheme === 'none') {
+        assert.equal(
+          Object.keys(node.credentials || {}).length, 0,
+          `${node.name} says 'none' but still carries a credential`
+        );
+      } else {
+        assert.ok(
+          Object.keys(node.credentials || {}).length > 0,
+          `${node.name} declares ${scheme} with no credential — every delivery 500s`
+        );
+      }
     }
-  });
-
-  test('Path A uses basic auth, which Pipedrive supports on the subscription', () => {
-    const node = byName.get('Webhook Pipedrive');
-    assert.equal(node.parameters.authentication, 'basicAuth');
-    assert.ok(node.credentials.httpBasicAuth);
-  });
-
-  test('Path B uses header auth, for X-Clay-Secret', () => {
-    const node = byName.get('Webhook Clay');
-    assert.equal(node.parameters.authentication, 'headerAuth');
-    assert.equal(node.credentials.httpHeaderAuth.name, 'clay_webhook_secret');
   });
 });
 
@@ -403,9 +409,11 @@ describe('Slack alerts', () => {
     }
   });
 
-  test('the channel comes from a CONFIG expression', () => {
+  test('the channel comes from a CONFIG expression, never a literal id', () => {
+    // Which CONFIG is the right one is the graph suite's job; here the point is
+    // only that no Slack node hard-codes a channel.
     for (const node of wf.nodes.filter((n) => n.type === 'n8n-nodes-base.slack')) {
-      assert.ok(JSON.stringify(node.parameters.channelId).includes("$('CONFIG')"), node.name);
+      assert.match(JSON.stringify(node.parameters.channelId), /\$\(\\?'CONFIG( B)?\\?'\)/, node.name);
     }
   });
 
@@ -489,6 +497,110 @@ describe('the graph', () => {
     }
     const orphans = wf.nodes.map((n) => n.name).filter((n) => !reachable.has(n));
     assert.deepEqual(orphans, [], `unreachable nodes: ${orphans.join(', ')}`);
+  });
+
+  test('every $(\'node\') reference names a node that is upstream of it', () => {
+    // n8n resolves `$('X')` only when X is CONNECTED upstream of the node doing
+    // the asking — not merely when X ran. Path B's nodes have CONFIG B above
+    // them and CONFIG nowhere, so a Path B expression naming CONFIG throws at
+    // run time. Worse, in the task runner that error's own constructor throws
+    // `Cannot assign to read only property 'name'` while being built, so the
+    // trace says nothing about the missing connection. This test is the reason
+    // that has to be found once rather than every time.
+    //
+    // References inside a `try` block are exempt: Dedupe asks for both webhook
+    // nodes on purpose and reads the throw as "not this path".
+    const ancestors = (target) => {
+      const seen = new Set();
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const [from, conn] of Object.entries(wf.connections)) {
+          for (const output of conn.main || []) {
+            for (const edge of output || []) {
+              if ((edge.node === target || seen.has(edge.node)) && !seen.has(from)) {
+                seen.add(from);
+                grew = true;
+              }
+            }
+          }
+        }
+      }
+      return seen;
+    };
+
+    // Comments talk about `$('Name')` in the abstract; only code counts.
+    const stripComments = (src) => src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .map((line) => line.replace(/^\s*\/\/.*$/, ''))
+      .join('\n');
+
+    // Remove every `try { ... }` body, brace-matched, so only unguarded
+    // references remain.
+    const stripTryBlocks = (src) => {
+      let out = '';
+      let i = 0;
+      while (i < src.length) {
+        const at = src.indexOf('try {', i);
+        if (at === -1) { out += src.slice(i); break; }
+        out += src.slice(i, at);
+        let depth = 0;
+        let j = at + 4;
+        for (; j < src.length; j += 1) {
+          if (src[j] === '{') depth += 1;
+          else if (src[j] === '}') { depth -= 1; if (depth === 0) { j += 1; break; } }
+        }
+        i = j;
+      }
+      return out;
+    };
+
+    const problems = [];
+    for (const node of wf.nodes) {
+      const sources = [nodeParams(node)];
+      if (node.parameters && typeof node.parameters.jsCode === 'string') {
+        sources[0] = JSON.stringify({ ...node.parameters, jsCode: undefined });
+        sources.push(stripTryBlocks(stripComments(node.parameters.jsCode)));
+      }
+      const above = ancestors(node.name);
+      for (const src of sources) {
+        for (const m of src.matchAll(/\$\(\\?'([^'\\]+)\\?'\)/g)) {
+          const referenced = m[1];
+          if (referenced === node.name) continue;
+          if (!byName.has(referenced)) {
+            problems.push(`${node.name} -> $('${referenced}') names no node in the workflow`);
+          } else if (!above.has(referenced)) {
+            problems.push(`${node.name} -> $('${referenced}') is not upstream of it`);
+          }
+        }
+      }
+    }
+    assert.deepEqual(problems, [], `unreachable references:\n  ${problems.join('\n  ')}`);
+  });
+
+  test('the per-path CONFIG lookup is one block, copied verbatim', () => {
+    // Six nodes carry the same fallback because n8n code nodes have no imports.
+    // Copies drift; this is what stops them. If a seventh node ever needs it,
+    // add the name here rather than retyping the block.
+    const WITH_FALLBACK = [
+      'Dedupe', 'Dedupe B', 'ParseScored', 'BuildOrgPatch',
+      'BuildNote', 'BuildAuditRow', 'BuildErrorPatch',
+    ];
+    const extract = (src) => {
+      const from = src.indexOf('let cfg = null;');
+      assert.notEqual(from, -1, 'no fallback block');
+      const to = src.indexOf('}', src.indexOf('ICP_NO_CONFIG'));
+      return src.slice(from, to + 1);
+    };
+    const blocks = WITH_FALLBACK.map((name) => {
+      const node = byName.get(name);
+      assert.ok(node, `${name} is not in the workflow`);
+      return [name, extract(node.parameters.jsCode)];
+    });
+    for (const [name, block] of blocks) {
+      assert.equal(block, blocks[0][1], `${name}'s copy has drifted from ${blocks[0][0]}'s`);
+    }
   });
 
   test('the anomaly warn is a non-blocking tee that dead-ends', () => {

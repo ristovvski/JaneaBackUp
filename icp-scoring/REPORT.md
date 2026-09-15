@@ -692,3 +692,85 @@ the production gate.
 - [ ] First 10 real scoring runs read end to end: note, fields, audit row, no drift flag
 - [ ] Slack approval recorded
 - [ ] `#gtm-ops` (not `-dev`) confirmed as the alert channel
+
+---
+
+## 11. Live DEV end to end, 2026-09-15
+
+Run against the real workspace: `WF-ICP-Score [DEV]` active, Pipedrive
+subscription 3167529 (`create.deal` v2) pointed at Path A, `ICP_Engine v5 [DEV]`
+on Clay behind its webhook trigger.
+
+### What is green
+
+| Hop | Result |
+| --- | --- |
+| Pipedrive `deal.added` → Path A | registered and firing; subscription 3167529 |
+| Path A, all 12 nodes | `success` — execution 57466 |
+| Path A → Clay webhook | `{"success": true}`; the trigger starts a Workflow run |
+| Path B, all 13 spine nodes | `PATCH organization`, `POST note` and `BuildAuditRow` all ok — execution 57477 |
+| Org 2695 custom fields | ICP Calculated `ICP A`, ICP Score `83`, ICP Scored At `2026-09-15`, ICP Model Version `v5` |
+| `ICP Final` | still `null`, as it must be |
+| Note | id 9422, the full component-by-component evidence trail |
+
+### What is not
+
+**The Clay run stops at the first classifier: no OpenAI key.** Path A does not
+send `openai_api_key` — the thirteenth webhook key that clay/WORKFLOW.md gap 7
+describes — so every `http-api-v2` node calling OpenAI gets a 401 with *"You
+didn't provide an API key"*. Three other placements were measured and none is
+reachable from the CLI; gap 7 has the detail and the ranking. Until one of them
+is chosen, the Clay half cannot run from a webhook, only from a CLI test that
+passes the key in the run input.
+
+**The audit row has nowhere to go.** `BuildAuditRow` produced the full 32-column
+row (`note_id: 9422`, `patch_written: true`), and `Append audit row` then failed
+with *"Can not get sheet 'By ID' with a value of 'null'"*: `CONFIG.audit_sheet_id`
+is unset, and the instance has no Google Sheets credential at all — the only
+`googleSheetsTriggerOAuth2Api` on it is a `REPLACE_ME` placeholder in another
+workflow. Two things are needed, not one: the sheet id in `ICP_AUDIT_SHEET_ID`,
+and a `gsheets_audit` credential for the node to authenticate with.
+
+**Slack is not wired.** `CONFIG.slack_channel_ops` is unset and neither Slack
+credential on the instance (`Smartlead Slack`, `Heyreach Slack`) is the ops one.
+Both Slack nodes sit on tees that dead-end, so this blocks alerting, not scoring.
+
+### The Path B run that proved it
+
+The `icp.scored` event was the one captured from the real Clay run on
+`akuvo.com` (`tests/golden/events/akuvo.icp_scored.json`), retargeted at org
+2695 with a fresh `request_id`/`event_id`. The classifier hop therefore came
+from a recorded Clay run rather than a live one — everything downstream of it
+is live, first-party, and wrote to the real CRM record.
+
+### Two defects this run found
+
+**1. Every Path B node referenced a node that is not upstream of it.** `Dedupe B`,
+`ParseScored`, `BuildOrgPatch`, `BuildNote`, `BuildAuditRow`, `BuildErrorPatch`,
+`Append audit row`, `Slack alert error` and `POST note error` all read
+`$('CONFIG')` — Path A's Set node. n8n resolves `$('X')` only when X is
+*connected* upstream, so Path B failed at its first code node on every delivery.
+It had never run end to end before; the node tests mock `$()` with a `CONFIG`
+key present on both paths, which hid it.
+
+n8n made it much worse than it needed to be: the expression error's own
+constructor throws while being built (`Cannot assign to read only property
+'name' of object 'Error: Invalid expression'` — `ExecutionBaseError` writing to
+a frozen `Error`), so the trace named neither the missing connection nor the
+node it wanted. The real cause is only visible in the stack, as
+`createNoConnectionError`.
+
+Fixed by giving the six shared code nodes one byte-identical block that tries
+`CONFIG` then `CONFIG B`, and by routing the three parameter-level expressions
+through a `cfgRef(path)` helper so no expression names a CONFIG node literally.
+`tests/static/workflow_review.test.mjs` now walks the connection graph and fails
+on any `$('X')` that is not an ancestor of the node using it — with references
+inside a `try` exempt, since `Dedupe` tells the two paths apart by catching
+exactly this throw.
+
+**2. Both webhooks were half-authenticated.** Each declared a scheme
+(`basicAuth`, `headerAuth`) with no credential behind it, which is not weaker
+auth but a dead endpoint: n8n answers every delivery with 500 *"No
+authentication data defined on node!"* while the subscription upstream still
+looks healthy. Both now say `authentication: 'none'` explicitly and run on the
+unguessable path, and `validate()` rejects either half without the other.

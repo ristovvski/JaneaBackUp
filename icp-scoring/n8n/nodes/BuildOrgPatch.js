@@ -37,7 +37,22 @@
 // Deliberately a comment and not disabled code: an unused branch rots, and the
 // decision is Nik's to make, not this node's to pre-empt.
 
-const cfg = $('CONFIG').item.json;
+// CONFIG on Path A, CONFIG B on Path B. The two Set nodes hold the same JSON,
+// but a Code node may only reference a node that is CONNECTED upstream of it:
+// n8n raises a "no connection" expression error otherwise, and in the task
+// runner that error's own constructor then throws
+// `Cannot assign to read only property 'name'`, which hides the real message
+// completely. A node that runs on both paths therefore has to ask for
+// whichever CONFIG is upstream of it. Kept byte-identical across the nodes
+// that need it; tests/static/workflow_review.test.mjs enforces that.
+let cfg = null;
+try { cfg = $('CONFIG').item.json; } catch (e) { cfg = null; }
+if (cfg === null || cfg === undefined) {
+  try { cfg = $('CONFIG B').item.json; } catch (e) { cfg = null; }
+}
+if (cfg === null || cfg === undefined) {
+  throw new Error('ICP_NO_CONFIG: neither CONFIG nor CONFIG B is upstream of this node');
+}
 const parsed = $('ParseScored').item.json;
 const fetched = $input.first().json;
 const org = fetched.data || fetched;

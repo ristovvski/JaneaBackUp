@@ -85,13 +85,22 @@ export function validate(workflow, { nodesDir } = {}) {
   const triggers = workflow.nodes.filter((n) => /webhook|trigger/i.test(n.type));
   if (triggers.length === 0) push('no trigger node');
 
-  // --- every webhook is authenticated -----------------------------------
+  // --- no webhook is half-authenticated ---------------------------------
+  // A scheme with no credential behind it is not weaker auth, it is a dead
+  // endpoint: n8n answers every delivery 500 "No authentication data defined
+  // on node!" while the trigger still looks registered upstream. Both webhooks
+  // here run on the unguessable path as their control, so the rule is that the
+  // two halves agree — 'none' with no credential, or a scheme with one.
   for (const node of workflow.nodes.filter((n) => n.type === 'n8n-nodes-base.webhook')) {
     const auth = node.parameters && node.parameters.authentication;
-    if (!auth || auth === 'none') {
-      push(`webhook "${node.name}" has no authentication (got ${JSON.stringify(auth)})`);
+    const creds = Object.keys(node.credentials || {}).length;
+    if (!auth) {
+      push(`webhook "${node.name}" does not state an authentication mode (say 'none' explicitly)`);
     }
-    if (!node.credentials || Object.keys(node.credentials).length === 0) {
+    if (auth === 'none' && creds > 0) {
+      push(`webhook "${node.name}" says authentication 'none' but carries a credential`);
+    }
+    if (auth && auth !== 'none' && creds === 0) {
       push(`webhook "${node.name}" declares authentication but references no credential`);
     }
   }
@@ -193,7 +202,10 @@ export function validate(workflow, { nodesDir } = {}) {
     if (!text.includes('$execution.id')) push(`Slack node "${node.name}" text omits execution_id`);
     if (!/request_id|_dedupe_key/.test(text)) push(`Slack node "${node.name}" text omits request_id`);
     const channel = JSON.stringify((node.parameters || {}).channelId || '');
-    if (!channel.includes("$('CONFIG')")) {
+    // Either CONFIG node will do: which one is correct depends on the path the
+    // Slack node sits on, and the graph test is what checks that it is the one
+    // actually upstream. What matters here is that it is never a literal id.
+    if (!/\$\(\\?'CONFIG( B)?\\?'\)/.test(channel)) {
       push(`Slack node "${node.name}" channel must come from a CONFIG expression`);
     }
   }

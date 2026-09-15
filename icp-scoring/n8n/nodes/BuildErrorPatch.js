@@ -8,7 +8,22 @@
 // Error, the patch is {} and the IF gate skips the PATCH. A Clay outage
 // retrying for an hour writes "Error" exactly once.
 
-const cfg = $('CONFIG').item.json;
+// CONFIG on Path A, CONFIG B on Path B. The two Set nodes hold the same JSON,
+// but a Code node may only reference a node that is CONNECTED upstream of it:
+// n8n raises a "no connection" expression error otherwise, and in the task
+// runner that error's own constructor then throws
+// `Cannot assign to read only property 'name'`, which hides the real message
+// completely. A node that runs on both paths therefore has to ask for
+// whichever CONFIG is upstream of it. Kept byte-identical across the nodes
+// that need it; tests/static/workflow_review.test.mjs enforces that.
+let cfg = null;
+try { cfg = $('CONFIG').item.json; } catch (e) { cfg = null; }
+if (cfg === null || cfg === undefined) {
+  try { cfg = $('CONFIG B').item.json; } catch (e) { cfg = null; }
+}
+if (cfg === null || cfg === undefined) {
+  throw new Error('ICP_NO_CONFIG: neither CONFIG nor CONFIG B is upstream of this node');
+}
 const item = $input.first().json || {};
 
 // The error and the ids come from whichever upstream node got far enough. In
