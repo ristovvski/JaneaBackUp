@@ -29,7 +29,8 @@
     "scan:secrets": "node scripts/scan_secrets.mjs",
     "scan:history": "node scripts/scan_secrets.mjs --history",
     "posttest": "node scripts/scan_secrets.mjs --tracked",
-    "gen:facts": "node scripts/gen_facts_formula.mjs"
+    "gen:facts": "node scripts/gen_facts_formula.mjs",
+    "gen:python": "node scripts/gen_clay_python.mjs"
   },
   "dependencies": {
     "ajv": "^8.17.1",
