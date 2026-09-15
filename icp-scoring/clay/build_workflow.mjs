@@ -345,9 +345,13 @@ function openAiNode({ name, bodyFrom, bodyPath, after }) {
         method: fixed('POST'),
         url: fixed(OPENAI_URL),
         body: ref('{{body}}'),
-        // A single-expression reference is type-preserving and passes the whole
-        // object, dynamic keys included.
-        headers: ref('{{headers}}'),
+        // `headers` is deliberately ABSENT from this mapping. It is supplied by
+        // the pin above and nothing else. An object-valued action parameter
+        // passed as `{ type: "reference" }` makes the action throw
+        // ERROR_ACTION_RUNTIME_ERROR at run time — the docs say a
+        // single-expression reference is "type-preserving and passes the whole
+        // object", and for this parameter it is not. Pinned and unmapped, the
+        // same headers arrive intact. Measured both ways; see clay/WORKFLOW.md.
         // Retry the transient classes only: 429 and 5xx. A 400 means the
         // request is wrong (a bad schema, an unsupported parameter) and no
         // number of retries will fix it — it must surface.
@@ -741,9 +745,8 @@ export const NODES = [
         // so DEV and production differ by payload, not by node config.
         url: ref('{{url}}'),
         body: ref('{{body}}'),
-        // Built by node 26 for the same reason as the OpenAI nodes: only the
-        // action's own parameters may be pinned onto a tool node.
-        headers: ref('{{headers}}'),
+        // Same as the OpenAI nodes: `headers` comes from the pin, never from a
+        // reference mapping. See clay/WORKFLOW.md.
         // 3x on 5xx, never on 4xx (clay_table_spec.md section 9). A 4xx is n8n
         // rejecting the event as malformed or unauthorized; retrying cannot fix
         // either and must surface as a failed run.

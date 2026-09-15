@@ -310,43 +310,46 @@ turn out to be the cause of the failure above, and calls with an explicit
 surprising, invisible unless you read `tools[0]` back, and would be the first
 suspect if these nodes ever start authenticating as something unexpected.
 
-### 13. A tool node accepts ONLY the action's own parameters — and violating it fails opaquely
+### 13. Two ways to wire a tool node that both fail with the same opaque error
 
-The published guidance says a property added to a tool node's `inputSchema`
-that is not a real action parameter is "silently dropped on save, so any
-`{{var}}` referencing it resolves to nothing". **That is not what happens here.**
+`ERROR_ACTION_RUNTIME_ERROR` — no HTTP status, no message, no parameter name,
+empty outputs — is what an `http-api-v2` node says for *every* input problem. It
+is also what it says for a malformed body, which is what sent the first
+debugging pass in the wrong direction entirely. Two distinct causes were found
+under it, and the rules that came out are:
 
-The property persists — `nodes get` shows it — and the action then throws at run
-time:
+**A property of your own in a tool node's `inputSchema` poisons the call.** The
+published guidance says such a property is "silently dropped on save, so any
+`{{var}}` referencing it resolves to nothing". It is not dropped. It persists —
+`nodes get` shows it — and the action throws. The classifier nodes pinned
+`openai_api_key` next to `body` and failed this way on every run; removing that
+one property, changing nothing else and deliberately leaving an invalid
+credential in place, turned the same call into a clean `401 error from the API`.
 
-```
-Tool execution failed with status: ERROR_ACTION_RUNTIME_ERROR
-```
+**An object-valued action parameter must be supplied by a PIN, never by a
+reference mapping.** With `headers` pinned from the code node upstream *and*
+mapped as `headers: { type: "reference", expression: "{{headers}}" }`, the
+action throws. Remove the mapping entry and leave only the pin, and the
+identical headers arrive intact and the call succeeds. The documented behaviour
+is the opposite — *"To pass an object an upstream node already produced, keep a
+single-expression reference — it is type-preserving and passes the whole
+object"* — and for this parameter it is not.
 
-No HTTP status. No message. No parameter name. Empty outputs. The identical
-error text a malformed request body produces.
+So: **string parameters by `inputMappingConfig` reference, object parameters by
+pin, and nothing in `inputSchema` that is not an action parameter.**
+`tests/static/clay_nodes.test.mjs` asserts all three on every `http-api-v2`
+node, because none of them is discoverable from a failing run.
 
-Proof: the classifier node pinned `openai_api_key` alongside `body` and failed
-this way on every run. Removing that one property — changing nothing else, and
-deliberately leaving a dummy credential in place — turned the same call into a
-clean `401 error from the API`. One property was the whole difference between an
-opaque runtime failure and a normal HTTP response.
+Two process notes that cost more than the bugs did:
 
-So the Authorization header cannot be assembled from a pinned value on the HTTP
-node. Instead the code node upstream builds the complete `headers` object and
-the tool node maps `headers: { type: "reference", expression: "{{headers}}" }` —
-`headers` is a real action parameter, and a single-expression reference is
-type-preserving and passes the whole object through, dynamic keys included. The
-key still never touches this repository or a node's static config.
-
-`tests/static/clay_nodes.test.mjs` now fails the build if any `http-api-v2` node
-pins a property outside the action's parameter list.
-
-This cost roughly six runs to find, chasing the body, its size, the retry
-options, the timeout and an auto-attached account first. What would have found
-it in one: an `ERROR_ACTION_RUNTIME_ERROR` means *the action rejected its
-inputs*, so diff the node's resolved inputs against the action's parameter list
-before looking at anything else.
+- **`clay workflows nodes test --source-run` reports
+  `ERROR_ACTION_RUNTIME_ERROR` whatever the node config is.** Several rounds of
+  bisecting through it produced "still fails" for configurations that were
+  actually correct, including the fix. Bisect with full `runs test` runs; on the
+  name-only input they cost zero Data Credits.
+- When an action fails, reproduce its exact resolved inputs through
+  `clay workflows actions test`. That path returns the real error, and it was
+  the only thing that ever showed one.
 
 ### 14. No documented accessor for the run id inside a code node
 

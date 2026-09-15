@@ -264,8 +264,19 @@ print(_json.dumps({"prompts": PROMPTS, "schemas": SCHEMAS}))
       if (node.spec.nodeType !== 'tool') continue;
       const mapping = node.spec.tools?.[0]?.inputMappingConfig ?? {};
       if (mapping.url?.value !== 'https://api.openai.com/v1/chat/completions') continue;
-      assert.equal(mapping.headers?.type, 'reference', `${node.spec.name}: headers must be a reference`);
       assert.equal(mapping.body?.type, 'reference', `${node.spec.name}: body must be a reference`);
+      // `headers` must NOT be in the mapping at all. An object-valued action
+      // parameter passed as a reference makes the action throw
+      // ERROR_ACTION_RUNTIME_ERROR at run time; supplied by the pin alone, the
+      // identical headers arrive intact. Measured both ways.
+      assert.equal(
+        mapping.headers, undefined,
+        `${node.spec.name}: headers must come from the pin, not from inputMappingConfig`,
+      );
+      assert.ok(
+        node.spec.inputSchema?.properties?.headers?.sourcePath,
+        `${node.spec.name}: headers must be pinned from the code node upstream`,
+      );
     }
   });
 
