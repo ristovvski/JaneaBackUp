@@ -1,0 +1,180 @@
+{
+  "request_id": "req-clay-wf-microsoft-001",
+  "org_id": "TEST-MICROSOFT",
+  "deal_id": null,
+  "identifier_kind": "domain",
+  "identifier_value": "microsoft.com",
+  "domain": "microsoft.com",
+  "linkedin_url": null,
+  "company_name": "Microsoft",
+  "hq_country": "United States",
+  "hq_state": "Washington",
+  "li_headcount": 232249,
+  "li_industry": "Software Development",
+  "li_description": "Every company has a mission. What's ours? To empower every person and every organization to achieve more. We believe technology can and should be a force for good and that meaningful innovation contributes to a brighter world in the future and today. Our culture doesn’t just encourage curiosity; it embraces it. Each day we make progress together by showing up as our authentic selves. We show up with a learn-it-all mentality. We show up cheering on others, knowing their success doesn't diminish our own. We show up every day open to learning our own biases, changing our behavior, and inviting in differences. Because impact matters. \n\nMicrosoft operates in 190 countries and is made up of approximately 228,000 passionate employees worldwide.",
+  "li_founded": null,
+  "li_hq": "Redmond, Washington, US",
+  "website_summary": "Microsoft sells software, cloud, AI, security, collaboration, developer, gaming, and device-related products and services. Page text names Microsoft 365, Azure, Copilot, Windows, Surface, Xbox, Dynamics 365, Microsoft Power Platform, Microsoft Teams, Windows 365, Visual Studio, and Microsoft Security.\n\nThe homepage describes Microsoft 365 as providing “cloud storage, advanced security, and Microsoft Copilot” in one plan. It describes Teams as online meetings, chat, real-time collaboration, and shared cloud storage; Windows 365 as streaming a Windows experience from the Microsoft cloud to any device; and Azure as supporting systems that learn and adapt. It also sells physical products including Surface computers and accessories, Xbox consoles/controllers, and other PCs and devices. Therefore, software is both a product category and part of offerings alongside non-software devices and gaming hardware.\n\nIt addresses personal customers, businesses, small businesses, developers and IT, education, and organizations. The About page states its mission is to empower every person and organization on the planet. The provided text does not specify customer company-size segments beyond “Small Business.”\n\nThe homepage includes business offerings such as AI, security, Azure, Dynamics 365, Microsoft 365 for business, Power Platform, Teams, Windows 365, and digital sovereignty. It also references developers, IT, software companies, and marketplace apps.\n\n**Careers:** The `/careers` page was reachable only as “Sign in.” It contains no engineering hiring, team-growth, or capacity language.\n\n**Product:** The `/product` page was reachable but says the requested page cannot be found. It contains no roadmap, platform-rebuild, or re-platforming language.\n\n**About:** The `/about` page was reachable. It describes Microsoft’s mission, organization, values, sustainability, social responsibility, stories, and AI, but does not provide hiring or product-roadmap details.\n\nPages reachable: homepage, /about, /product, /careers",
+  "revenue_estimate_usd": 10000000000,
+  "revenue_source": "Firmographic enrichment (inferred) (band \"$10B+\"); company profile lookup disagrees (band \"100B-1T\")",
+  "funding_stage": "initial_coin_offering",
+  "last_round_date": "2024-05-05",
+  "last_round_usd": null,
+  "open_eng_roles_count": 6,
+  "eng_roles_open_60d_plus": 0,
+  "senior_eng_roles": 2,
+  "eng_headcount_estimate": 126204,
+  "news_last_12mo": [
+    {
+      "url": "http://techtime.news/2026/09/02/microsoft-israel",
+      "date": "2026-12-31",
+      "source": "leaves",
+      "headline": "Michal Braverman-Blumenstyk to leave Microsoft after 13 years."
+    },
+    {
+      "url": "https://www.calcalistech.com/ctechnews/article/hygqslrdml",
+      "date": "2026-12-31",
+      "source": "leaves",
+      "headline": "Microsoft Israel R&D chief Michal Braverman-Blumenstyk to step down after 13 years."
+    },
+    {
+      "url": "https://visualstudiomagazine.com/articles/2026/08/28/microsoft-spotlights-vslive-takeaways-upcoming-san-diego-and-orlando-events.aspx",
+      "date": "2026-11-15",
+      "source": "attends_event",
+      "headline": "Microsoft spotlights VSLive! Takeaways, upcoming San Diego and Orlando events."
+    },
+    {
+      "url": "https://www.geekwire.com/2026/tech-moves-t-mobile-appoints-cfo-microsoft-and-blue-origin-vps-depart-azx-and-caddi-name-leaders",
+      "date": "2026-10-16",
+      "source": "leaves",
+      "headline": "Tech Moves: T-Mobile appoints CFO; Microsoft and Blue Origin VPs depart; AZX and Caddi name leaders."
+    },
+    {
+      "url": "https://thesamclub.co.uk/microsoft-365-e7-promotion-retires-2026",
+      "date": "2026-10-01",
+      "source": "launches",
+      "headline": "Microsoft 365 E7 promotion ends early: retires 30 September 2026."
+    },
+    {
+      "url": "https://www.geekwire.com/2026/microsoft-starts-merging-its-copilot-consumer-and-business-apps-in-advance-of-super-app-rollout",
+      "date": "2026-09-30",
+      "source": "is_developing",
+      "headline": "Microsoft starts merging its Copilot consumer and business apps in advance of 'Super App' rollout."
+    },
+    {
+      "url": "https://www.provokemedia.com/latest/article/microsoft-promotes-katarina-wallin-bureau-to-lead-european-government",
+      "date": "2026-09-14",
+      "source": "promotes",
+      "headline": "Microsoft promotes Katarina Wallin-Bureau to lead European government."
+    },
+    {
+      "url": "https://www.prnewswire.com/news-releases/abacus-launches-ai-initiative-to-accelerate-enterprise-ai-adoption-for-regulated-industries-302876630.html",
+      "date": "2026-09-14",
+      "source": "partners_with",
+      "headline": "Abacus launches AI[3] initiative to accelerate enterprise AI adoption for regulated industries."
+    },
+    {
+      "url": "https://www.pcworld.com/article/3233566/your-pc-knows-your-age-your-tv-knows-what-you-watch-privacy-is-disappearing.html",
+      "date": "2026-09-14",
+      "source": "launches",
+      "headline": "Your PC knows your age. Your TV knows what you watch. Privacy is disappearing."
+    },
+    {
+      "url": "https://cstg.com/tech-update-video-could-this-be-the-future-of-cybersecurity",
+      "date": "2026-09-12",
+      "source": "is_developing",
+      "headline": "Tech Update Video - Could this be the future of cybersecurity?"
+    },
+    {
+      "url": "https://www.theregister.com/devops/2026/09/11/microsoft-annoints-rust-as-a-tier-1-internal-language/5295732",
+      "date": "2026-09-11",
+      "source": "attends_event",
+      "headline": "Microsoft annoints Rust as a 'Tier 1' internal language."
+    },
+    {
+      "url": "https://www.naftogaz.com/en/news/naftogaz-group-and-microsoft-deepen-their-ai-and-big-data-analytics-collaboration-in-oil-and-gas",
+      "date": "2026-09-11",
+      "source": "partners_with",
+      "headline": "Naftogaz Group and Microsoft deepen their AI and Big Data analytics collaboration in oil and gas."
+    },
+    {
+      "url": "https://spidersweb.pl/2026/09/windows-11-szybsze-dzialanie-8-gb-pamieci-operacyjnej.html",
+      "date": "2026-09-11",
+      "source": "attends_event",
+      "headline": "Windows 11 will favor weaker computers. An important improvement."
+    },
+    {
+      "url": "https://www.broadbandtvnews.com/2026/09/10/nagravision-partners-with-microsoft-to-bring-ai-powered-anti-piracy-intelligence-to-azure",
+      "date": "2026-09-10",
+      "source": "integrates_with",
+      "headline": "Nagravision partners with Microsoft to bring AI-powered anti-piracy intelligence to Azure."
+    },
+    {
+      "url": "https://www.cio.com/article/4220712/microsoft-targets-salesforce-customers-with-ai-powered-dynamics-365-migration-tool.html",
+      "date": "2026-09-10",
+      "source": "launches",
+      "headline": "Microsoft targets Salesforce customers with AI-powered Dynamics 365 migration tool."
+    },
+    {
+      "url": "https://markup.ai/blog/blog-markup-expands-content-control",
+      "date": "2026-09-09",
+      "source": "integrates_with",
+      "headline": "Markup AI expands its AI Content editor to the tools marketing teams already use."
+    },
+    {
+      "url": "https://trainingindustry.com/press-release/content-development/articulate-unveils-major-platform-evolution-with-nova-frontline-and-new-enterprise-integrations",
+      "date": "2026-09-08",
+      "source": "integrates_with",
+      "headline": "Articulate unveils major platform evolution with Nova, Frontline and new enterprise integrations."
+    },
+    {
+      "url": "https://www.bleepingcomputer.com/news/microsoft/microsoft-adds-age-awareness-apis-that-can-tell-if-users-are-children-teens-or-adults",
+      "date": "2026-09-08",
+      "source": "launches",
+      "headline": "Microsoft adds age-awareness APIs that can tell if users are children, teens, or adults."
+    },
+    {
+      "url": "https://www.artificialintelligence-news.com/news/ai-weather-forecasting-google-weathernext-3-energy",
+      "date": "2026-09-08",
+      "source": "identified_as_competitor_of",
+      "headline": "AI weather forecasting enters the energy market as Google targets grid operators with WeatherNext 3."
+    },
+    {
+      "url": "https://www.maddyness.com/2026/09/07/ia-laurent-sifre-co-fondateur-de-h-company-rejoint-microsoft",
+      "date": "2026-09-07",
+      "source": "hires",
+      "headline": "AI: Laurent Sifre, co-founder of H Company, joins Microsoft."
+    },
+    {
+      "url": "https://ascii.co.uk/news/article/news-20260907-b57622d6/microsoft-uses-ai-agents-to-generate-winui-apps-in-30-minute",
+      "date": "2026-09-07",
+      "source": "launches",
+      "headline": "Microsoft uses AI agents to generate WinUI apps in 30 minutes."
+    },
+    {
+      "url": "https://emergencyservicestimes.com/2026/09/07/microsoft-is-helping-police-forces-move-ai-from-pilots-to-frontline-policing",
+      "date": "2026-09-06",
+      "source": "attends_event",
+      "headline": "Microsoft is helping police forces move AI from pilots to frontline policing."
+    },
+    {
+      "url": "https://www.straitstimes.com/paid-press-releases/midea-smart-master-at-ifa-2026-from-ai-agents-to-embodied-intelligence-20260905",
+      "date": "2026-09-05",
+      "source": "attends_event",
+      "headline": "Midea SMART MASTER at IFA 2026: from AI agents to embodied intelligence."
+    },
+    {
+      "url": "https://blog.krystlesean.com/ai-copyright-lawsuits-what-malaysian-smes-must-do-now",
+      "date": "2026-09-05",
+      "source": "has_issues_with",
+      "headline": "AI copyright lawsuits: what Malaysian smes must Do now."
+    },
+    {
+      "url": "https://en.channeliam.com/2026/08/22/kochi-kerala-cyber-suraksha-summit",
+      "date": "2026-09-05",
+      "source": "attends_event",
+      "headline": "Kerala to host cybersecurity summit."
+    }
+  ],
+  "captured_at": "2026-09-15T13:54:53Z"
+}

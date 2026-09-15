@@ -1,0 +1,122 @@
+{
+  "event": "icp.scored",
+  "score": {
+    "flags": [
+      "tier2_candidate"
+    ],
+    "grade": "C",
+    "status": "scored",
+    "composite": 50,
+    "multiplier": 1,
+    "final_score": 50,
+    "levels_used": {
+      "industry": 10,
+      "geography": 10,
+      "company_type": 10,
+      "buying_signal": 7,
+      "revenue_range": 0,
+      "stage_maturity": 0
+    },
+    "industry_tier": "Anchor",
+    "model_version": "v5",
+    "industry_level": 10,
+    "tier2_candidate": true,
+    "confidence_overall": "high",
+    "buying_signal_level": 7,
+    "activation_state_used": "Accelerating",
+    "final_score_without_activation": 50
+  },
+  "org_id": "TEST-MICROSOFT",
+  "deal_id": null,
+  "event_id": "req-req-clay-wf-microsoft-001",
+  "clay_table": "ICP_Engine v5 [DEV] (Clay Workflow)",
+  "components": {
+    "geography": {
+      "value": 10,
+      "evidence": [
+        "hq_country: United States",
+        "hq_state: Washington",
+        "li_hq: Redmond, Washington, US"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "company_type": {
+      "value": 10,
+      "evidence": [
+        "li_industry: Software Development",
+        "website_summary: Microsoft sells software, cloud, AI, security, collaboration, developer, gaming, and device-related products and services.",
+        "website_summary: Therefore, software is both a product category and part of offerings alongside non-software devices and gaming hardware."
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "buying_signal": {
+      "value": 7,
+      "evidence": [
+        "open_eng_roles_count: 6",
+        "senior_eng_roles: 2",
+        "eng_roles_open_60d_plus: 0",
+        "news_last_12mo: 2026-09-07 — AI: Laurent Sifre, co-founder of H Company, joins Microsoft.",
+        "news_last_12mo: 2026-09-11 — Microsoft annoints Rust as a 'Tier 1' internal language.",
+        "last_round_date: 2024-05-05"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "revenue_range": {
+      "value": 0,
+      "evidence": [
+        "revenue_estimate_usd: 10000000000.0",
+        "revenue_source: Firmographic enrichment (inferred) (band \"$10B+\"); company profile lookup disagrees (band \"100B-1T\")"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "stage_maturity": {
+      "value": 0,
+      "evidence": [
+        "li_headcount: 232249",
+        "eng_headcount_estimate: 126204",
+        "open_eng_roles_count: 6",
+        "eng_roles_open_60d_plus: 0"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "activation_state": {
+      "value": "Accelerating",
+      "evidence": [
+        "news_last_12mo: 2026-09-07 — AI: Laurent Sifre, co-founder of H Company, joins Microsoft.",
+        "news_last_12mo: 2026-09-10 — Microsoft targets Salesforce customers with AI-powered Dynamics 365 migration tool.",
+        "open_eng_roles_count: 6",
+        "senior_eng_roles: 2"
+      ],
+      "confidence": "high",
+      "missing_inputs": [],
+      "evidence_dated_within_months": null
+    },
+    "industry_vertical": {
+      "value": "Enterprise Tech / Hyperscalers",
+      "evidence": [
+        "li_headcount: 232249",
+        "li_industry: Software Development",
+        "website_summary: Microsoft sells software, cloud, AI, security, collaboration, developer, gaming, and device-related products and services.",
+        "website_summary: It addresses personal customers, businesses, small businesses, developers and IT, education, and organizations."
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    }
+  },
+  "emitted_at": "2026-09-15T13:55:48Z",
+  "request_id": "req-clay-wf-microsoft-001",
+  "clay_row_url": null,
+  "facts_summary": {
+    "revenue_usd": 10000000000,
+    "headcount_eng": 126204,
+    "headcount_total": 232249
+  },
+  "model_version": "v5",
+  "identifier_kind": "domain",
+  "identifier_value": "microsoft.com"
+}
