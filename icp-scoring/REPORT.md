@@ -1571,3 +1571,113 @@ new contract. They are evidence of a real enrichment run under a contract that
 carried `identifier_kind`, so `engine/schemas/v5/enrichment_facts.schema.json`
 is frozen for them, exactly as the v5 event schema already was. The authored
 `SYNTHETIC_*` fixtures were migrated, because those are fixtures.
+
+---
+
+## 17. Trigger coverage: lead → deal conversion — 2026-09-17
+
+**Question:** a rep moves a lead into a deal. Does Pipedrive fire `deal.added`
+for that, or does the conversion arrive as something else — and does the ICP
+workflow see it?
+
+**Answer: it fires `deal.create`, and Path A already covers it.** No new
+subscription, no new trigger, no change to the workflow. Proved on the wire,
+not read from the docs.
+
+### How it was measured
+
+A throwaway n8n workflow (`zz_icp_trigger_probe`) captured **every** `deal.*`
+and `lead.*` event on the account — two v2 subscriptions with
+`event_action: "*"` — while a real lead was created and converted. Both
+subscriptions and the probe workflow were deleted afterwards; the account is
+back to the four subscriptions listed below.
+
+### What a conversion actually fires
+
+One lead (id truncated to `5934fe40…` — the scanner rejects a bare UUID and
+is right to, even for a deleted lead), converted at 14:20:08. Three
+events, within 600ms:
+
+| time | event | entity_id |
+|---|---|---|
+| 14:20:09.230 | **`deal.create`** | **2276** — the new deal |
+| 14:20:09.608 | `lead.change` | the lead, marked converted |
+| 14:20:09.791 | `lead.delete` | the lead, gone from the Leads Inbox |
+
+The `deal.create` envelope is **structurally identical to a manual create**:
+`version 2.0`, `change_source: "app"`, `previous: null`, `data.org_id: 22586`.
+There is no `deal.change`, no stage-change event, and nothing that needs
+special handling.
+
+### `origin_id` is not a lead reference
+
+The converted deal carries `origin: "Marketplace"`, `origin_id:
+"a9db4585e4aa124a"`, `channel_id: "Claude"` — **inherited from the lead**, and
+`origin_id` matches the lead's own `origin_id` exactly. It describes how the
+record first entered Pipedrive, not that a conversion happened, and it is **not
+the lead's id**. Nothing in the deal payload points back at the lead.
+
+Compare three real deals from today:
+
+| deal | `origin` | `origin_id` | `channel_id` | how it was made |
+|---|---|---|---|---|
+| 2274 | `ManuallyCreated` | `null` | `null` | typed into the UI |
+| 2275 | `Marketplace` | `97c68091…` | `Surfe` | came in through Surfe |
+| 2276 | `Marketplace` | `a9db4585…` | `Claude` | converted from a lead |
+
+So a hand-made deal is distinguishable from an integration-made one, but a
+converted lead is **not** reliably distinguishable from a deal the same
+integration created directly — a lead typed into the UI and then converted
+would read `ManuallyCreated` too. That does not matter here: both paths produce
+the same event, and both get scored the same way.
+
+### Exactly once, both ways
+
+| | `deal.create` events | Path A executions | outcome |
+|---|---|---|---|
+| **converted from a lead** (deal 2276) | 1 | 1 — exec **60605** | `intellistack.com` → Clay |
+| **created directly** (deal 2277) | 1 | 1 — exec **60613** | `intellistack.com` → Clay |
+
+Counted on the probe, which saw every deal event on the account for the whole
+window: `{"2276": 1, "2277": 1}`. No duplicate delivery, no second execution,
+and the `lead.change` / `lead.delete` that accompany a conversion never reach
+Path A because Path A subscribes to `create.deal` only.
+
+Both test deals were deleted afterwards. Each spent one Clay row on
+`intellistack.com`.
+
+### What we subscribe to
+
+Four subscriptions exist on the account. **One** is ours:
+
+| id | event | target | ours? |
+|---|---|---|---|
+| **3167529** | **`create.deal`** (v2) | **Path A** | **yes — the only ICP trigger** |
+| 3163026 | `*.lead` (v2) | `{{WEBHOOK_I04_PD_EVENTS}}` | no — the DNC stack |
+| 3163027 | `*.person` (v2) | `{{WEBHOOK_I04_PD_EVENTS}}` | no — the DNC stack |
+| 3110256 | `*.*` (v1) | a Make.com hook | no — predates this work |
+
+Nothing was added. `create.deal` is sufficient and is the narrowest
+subscription that covers both cases: a wider one (`*.deal`) would deliver every
+edit to every deal forever, and Dedupe would drop them — but only after they had
+already cost an execution each.
+
+### The real gap is not the trigger — it is the organization
+
+`Normalize` marks a deal unscoreable when it has no `org_id`, because this
+workflow scores the **organization**. A lead with no organization converts into
+a deal with no organization, and there is nothing to score.
+
+Measured on 2026-09-17 across every open, unarchived lead:
+
+| | leads |
+|---|---|
+| total open | 58,616 |
+| with an organization | 20,685 |
+| **without an organization** | **37,931 (64.7%)** |
+
+Two thirds of the lead inbox would convert into a deal this workflow skips —
+not because the trigger missed it, but because there is no company on it. That
+is a Pipedrive data question, the same shape as the Website URL one: a lead
+needs an organization before conversion, or the conversion step has to create
+one. Worth raising with Nik alongside the website requirement.
