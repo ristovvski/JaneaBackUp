@@ -123,29 +123,33 @@
     "E-commerce / Retail Tech": 0,
     "Pre-product Startups": 0
   },
-  "f_icp_calculated": "PLACEHOLDER_icp_calculated_0000000000000000000000",
-  "f_icp_score": "PLACEHOLDER_icp_score_000000000000000000000000000",
-  "f_icp_scored_at": "PLACEHOLDER_icp_scored_at_00000000000000000000000",
-  "f_icp_model_version": "PLACEHOLDER_icp_model_version_0000000000000000000",
-  "f_icp_final": "PLACEHOLDER_icp_final_000000000000000000000000000",
+  "f_auto_icp_score": "PLACEHOLDER_auto_icp_score_0000000000000000000000000000000000",
+  "f_auto_icp_scored_at": "PLACEHOLDER_auto_icp_scored_at_000000000000000",
+  "f_sales_rep_icp_score": "PLACEHOLDER_sales_rep_icp_score_00000000000000000000000000000",
   "fields_never_write": [
-    "PLACEHOLDER_icp_final_000000000000000000000000000"
+    "PLACEHOLDER_sales_rep_icp_score_00000000000000000000000000000",
+    "PLACEHOLDER_website_url_00000000000000000000"
   ],
-  "opt_icp_calculated": {
-    "ICP A": null,
-    "ICP B": null,
-    "ICP C": null,
-    "Insufficient data": null,
-    "Error": null
-  },
-  "label_insufficient": "Insufficient data",
-  "label_error": "Error",
+  "f_website_url": "PLACEHOLDER_website_url_00000000000000000000",
+  "fields_written": [
+    "PLACEHOLDER_auto_icp_score_0000000000000000000000000000000000",
+    "PLACEHOLDER_auto_icp_scored_at_000000000000000"
+  ],
+  "auto_score_separator": " - ",
+  "label_insufficient": "n/a - insufficient data",
+  "label_error": "n/a - error",
+  "label_no_website": "n/a - no website",
+  "activity_type": "task",
+  "activity_subject": "ICP scored",
+  "activity_max_chars": 900,
+  "activity_subject_skipped": "ICP not scored",
+  "activity_no_website": "Skipped: organization has no Website URL — fill it and re-create the deal or re-run",
   "rescore_after_days": 180,
+  "model_effective_date": "2026-09-17",
   "rescore_on_error_or_insufficient": true,
   "dedupe_ttl_hours": 48,
   "max_events_per_hour": 200,
   "note_max_chars": 1500,
-  "audit_data_table": "icp_audit",
   "trigger_entity": "deal",
   "trigger_action": "create",
   "clay_event_name": "icp.scored"

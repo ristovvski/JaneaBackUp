@@ -22,17 +22,18 @@ export const BEGIN = '/* ---8<--- BEGIN FACTS BODY (generated; paste unchanged) 
 export const END = '/* ---8<--- END FACTS BODY --- */';
 
 // Keys the webhook already delivers; everything else comes from enrichment.
+//
+// Four, not ten. The v6 payload carries ONE identifier — the domain — so
+// linkedin_url, company_name and the HQ pair are no longer seeded from
+// Pipedrive: the table discovers them from the domain like any other fact.
+// identifier_kind and identifier_value are gone entirely, because the thing
+// they existed to express — "this row is being scored from a company NAME" —
+// is no longer a thing the pipeline can do.
 const FROM_WEBHOOK = {
   request_id: 'Request Id',
   org_id: 'Org Id',
   deal_id: 'Deal Id',
-  identifier_kind: 'Identifier Kind',
-  identifier_value: 'Identifier Value',
   domain: 'Domain',
-  linkedin_url: 'Linkedin Url',
-  company_name: 'Company Name',
-  hq_country: 'Hq Country',
-  hq_state: 'Hq State',
 };
 
 // Harness bookkeeping — never sent to a classifier, never part of facts_json.

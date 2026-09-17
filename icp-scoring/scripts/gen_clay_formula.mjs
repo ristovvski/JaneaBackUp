@@ -289,7 +289,8 @@ Two things are deliberately NOT in the Clay formula:
 
   2. Identifier normalization (engine/normalize.mjs) runs in n8n before the
      Clay request is built, so Clay receives an already-normalized
-     identifier_value and never has to agree with n8n about what a domain is.
+     \`domain\` and never has to agree with n8n about what a domain is. It is
+     the ONE identifier: no domain, no request, no row.
 
 If a future rubric version needs something Clay's formula language cannot
 express, the fallback is to move score_json out of Clay: n8n already imports

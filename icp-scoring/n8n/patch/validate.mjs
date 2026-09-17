@@ -33,7 +33,12 @@ export const CONTINUE_ON_FAIL_ALLOWLIST = ['Slack alert error'];
 // second activity on the organization, a second Clay row, a second audit
 // row. Dedupe protects against a redelivered EVENT, not against n8n
 // retrying one HTTP call it already made.
-export const MUST_NOT_RETRY = ['POST activity', 'POST activity error', 'POST Clay'];
+export const MUST_NOT_RETRY = [
+  'POST activity',
+  'POST activity (no website)',
+  'POST activity error',
+  'POST Clay',
+];
 
 export function validate(workflow, { nodesDir } = {}) {
   const findings = [];

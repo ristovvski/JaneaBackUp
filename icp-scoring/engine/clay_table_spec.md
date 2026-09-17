@@ -4,7 +4,7 @@ Clay is built by hand in the UI. This is the exact column list, in order, with
 types, sources and the contract each column has to satisfy. Everything that can
 be tested offline lives elsewhere in this repo and is referenced below.
 
-**Model version:** v5 · **Rows:** one per scoring request (not one per company —
+**Model version:** v6 · **Rows:** one per scoring request (not one per company —
 a re-score creates a new row, so the history is preserved).
 
 > **Provider choice is Nik's.** This spec fixes the *column contract* — name,
@@ -25,24 +25,38 @@ Webhook body from n8n (`BuildClayRequest`):
 
 ```json
 {
-  "request_id":       "req-icp-0001",
-  "org_id":           "10001",
-  "deal_id":          "55001",
-  "identifier_kind":  "domain",
-  "identifier_value": "akuvo.com",
-  "domain":           "akuvo.com",
-  "linkedin_url":     "https://www.linkedin.com/company/akuvo",
-  "company_name":     "Akuvo",
-  "hq_country":       "United States",
-  "hq_state":         "Colorado",
-  "model_version":    "v5",
-  "callback_url":     "<n8n Path B webhook URL, from CONFIG>"
+  "org_id":        10001,
+  "deal_id":       55001,
+  "domain":        "akuvo.com",
+  "request_id":    "req-icp-0001",
+  "callback_url":  "<n8n Path B webhook URL, from CONFIG>",
+  "requested_at":  "2026-09-18T10:42:00Z",
+  "model_version": "v6"
 }
 ```
 
-`identifier_value` is already normalized by `engine/normalize.mjs` in n8n, so
-Clay never has to agree with n8n about what a domain is. A null field is sent as
-`null`, never omitted and never `""`.
+**Seven keys, and there is never an eighth.** `domain` is the ONE identifier.
+It is already normalized by `engine/normalize.mjs` in n8n — lowercase, no
+scheme, no `www.`, no path — so Clay never has to agree with n8n about what a
+domain is, and it is never null: an organization whose Pipedrive **Website URL**
+is empty, unparseable, or a directory (linkedin.com, crunchbase.com, a Wix
+subdomain) is **not sent to this table at all**. n8n writes
+`n/a - no website` on the organization and posts one activity asking for the
+field; nothing is enriched and no credit is spent.
+
+`org_id` and `deal_id` cross as **numbers**, because a column that is sometimes
+`2695` and sometimes `"2695"` joins against nothing. `deal_id` may be null.
+`requested_at` is the table's "today" for days-open arithmetic on job postings,
+and it is what the Contracting guard measures evidence age against.
+
+**Removed in v6.1**, and the columns should be deleted from the table rather
+than left to arrive empty: `identifier_kind`, `identifier_value`,
+`linkedin_url`, `company_name`, `hq_state`, `hq_country`. The first two
+expressed "score this row from a company NAME", which the pipeline can no
+longer do; the last four existed to make a name lookup land on the right
+company of that name. With no name lookup there is nothing to disambiguate, and
+the LinkedIn URL, the company name and the HQ pair are now **outputs** the table
+discovers from the domain like any other fact.
 
 ---
 
@@ -59,19 +73,20 @@ This is the one value that lets you follow a single scoring decision end to end.
 Pipedrive ids as **strings**. `deal_id` may be null (a re-score triggered
 outside a deal). `org_id` is never null.
 
-### 3 — `identifier_kind`, `identifier_value`  ·  text  ·  from webhook
+### 3 — `domain`  ·  text  ·  from webhook
 
-`identifier_kind` ∈ `domain` | `linkedin` | `name`, in that priority order.
-`name` means the org had neither a website nor a LinkedIn company URL:
-NEEDS_DECISION #5 default is to score it anyway, from name + HQ, at low
-confidence — never `Insufficient data` on a missing identifier alone.
+The one identifier, and the one input every enrichment column starts from.
+Never null. NEEDS_DECISION #5 is closed by Nik's ruling: an organization with
+no usable Website URL is **not scored**, it is sent back to a human with the
+one field it needs — so there is no name lookup, no LinkedIn fallback, and no
+low-confidence guess at which of six companies with the same name was meant.
 
-### 4 — `domain`, `linkedin_url`, `company_name`, `hq_country`, `hq_state`  ·  text  ·  webhook + enrichment fallback
+### 4 — `linkedin_url`, `company_name`, `hq_country`, `hq_state`  ·  text  ·  enrichment
 
-Seeded from the webhook. Where the webhook value is null, an enrichment column
-may fill it (LinkedIn company lookup by domain, or a domain lookup by company
-name). **Fill-if-empty only** — never overwrite a value n8n sent, because n8n's
-value came from Pipedrive and Pipedrive is where a human typed it.
+**Outputs, not inputs.** In v6.0 these were seeded from the webhook and filled
+in where null; the webhook no longer sends them, so they are discovered from
+`domain` like any other fact. Nothing downstream may treat them as a second
+identifier.
 
 ### 5 — Enrichment
 

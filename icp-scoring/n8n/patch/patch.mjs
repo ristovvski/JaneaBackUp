@@ -309,6 +309,14 @@ export function buildWorkflow() {
     onError: 'continueErrorOutput',
   }));
 
+  // The website gate. BuildClayRequest decided; this only routes.
+  //
+  // True is the ordinary path: a domain was resolved and the table gets asked.
+  // False is not an error branch — it is an ordinary outcome with an ordinary
+  // result, so it leaves the SAME footprint a scored run leaves: the two
+  // organization fields, written together, and one activity.
+  nodes.push(ifNode('IF has website?', [1740, 160], [boolCondition('$json.has_website', true)]));
+
   nodes.push({
     parameters: {
       method: 'POST',
@@ -322,11 +330,45 @@ export function buildWorkflow() {
     name: 'POST Clay',
     type: 'n8n-nodes-base.httpRequest',
     typeVersion: 4.2,
-    position: [1740, 160],
+    position: [1940, 60],
     // A retried POST creates a SECOND Clay row: a second scoring run and a
     // second credit. Never retry it.
     ...NO_RETRY,
   });
+
+  // ----- no website: write the two fields, post one activity, stop ---------
+  nodes.push(codeNode('BuildNoWebsiteWrite', [1940, 280], code('BuildNoWebsiteWrite')));
+
+  // Same no-churn rule as Path B: a second deal on the same day for the same
+  // website-less organization changes nothing, so it sends no PATCH — and
+  // still posts its activity, because the activity is addressed to whoever
+  // created THIS deal.
+  nodes.push(ifNode('IF no-website write needed?', [2140, 280], [boolCondition('$json.patch_is_empty', false)]));
+
+  nodes.push(httpNode('PATCH organization (no website)', [2340, 200], {
+    method: 'PATCH',
+    url: `=${PIPEDRIVE_V2}/organizations/{{ $json.org_id }}`,
+    sendBody: true,
+    specifyBody: 'json',
+    jsonBody: '={{ JSON.stringify($json.patch) }}',
+  }, RETRY));
+
+  // Reads BuildNoWebsiteWrite by name, not $json: on the written branch the
+  // item arriving here is Pipedrive's PATCH response, and on the unchanged
+  // branch it is the builder's own output. One source, both ways.
+  nodes.push(httpNode('POST activity (no website)', [2540, 280], {
+    method: 'POST',
+    url: `=${PIPEDRIVE_V1}/activities`,
+    sendBody: true,
+    specifyBody: 'json',
+    jsonBody:
+      '={{ JSON.stringify({ ' +
+      "org_id: Number($('BuildNoWebsiteWrite').item.json.org_id), " +
+      "subject: $('BuildNoWebsiteWrite').item.json.subject, " +
+      "type: $('BuildNoWebsiteWrite').item.json.type, " +
+      'done: true, ' +
+      "note: $('BuildNoWebsiteWrite').item.json.body }) }}",
+  }, NO_RETRY));
 
   // Non-blocking tee: anomaly gate on trigger volume.
   nodes.push(ifNode('IF rate exceeded?', [540, -100], [boolCondition('$json._rate_exceeded', true)]));
@@ -503,7 +545,16 @@ export function buildWorkflow() {
     'IF fresh score?': branch(['Skip fresh score'], ['BuildClayRequest']),
     // Output 0 is success, output 1 is the error output (onError:
     // continueErrorOutput).
-    BuildClayRequest: { main: [out('POST Clay'), out('BuildErrorContext')] },
+    BuildClayRequest: { main: [out('IF has website?'), out('BuildErrorContext')] },
+    'IF has website?': branch(['POST Clay'], ['BuildNoWebsiteWrite']),
+    BuildNoWebsiteWrite: main('IF no-website write needed?'),
+    // Both branches converge on the activity: exactly one runs, so exactly one
+    // activity is posted either way.
+    'IF no-website write needed?': branch(
+      ['PATCH organization (no website)'],
+      ['POST activity (no website)']
+    ),
+    'PATCH organization (no website)': main('POST activity (no website)'),
 
     // Path B
     'Webhook Clay': main('Respond 200 B'),

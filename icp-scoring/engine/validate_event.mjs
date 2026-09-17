@@ -15,10 +15,14 @@
 
 export const STATES = ['Accelerating', 'Transitioning', 'Stable', 'Contracting'];
 export const CONFIDENCES = ['high', 'medium', 'low'];
-export const IDENTIFIER_KINDS = ['domain', 'linkedin', 'name'];
 
+// One identifier, and it is the domain. v6.0 accepted a kind/value pair that
+// could say `name` — and a name lookup that lands on the wrong company of the
+// same name scores a stranger's record while looking exactly like a correct
+// run. The pair is gone; an organization with no usable website is never sent
+// to the table at all, so every event that arrives has a domain in it.
 export const REQUIRED_TOP = [
-  'request_id', 'org_id', 'requested_at', 'identifier_kind', 'identifier_value',
+  'request_id', 'org_id', 'requested_at', 'domain',
   'resolved', 'cls_all', 'apollo_summary', 'model_version',
 ];
 
@@ -81,8 +85,9 @@ export function validateEvent(raw, cfg) {
   if (!Number.isInteger(raw.org_id) || raw.org_id < 1) problems.push(`org_id must be a positive integer, got ${JSON.stringify(raw.org_id)}`);
   if (raw.deal_id !== undefined && !isIntOrNull(raw.deal_id)) problems.push(`deal_id must be an integer or null, got ${JSON.stringify(raw.deal_id)}`);
   if (typeof raw.requested_at !== 'string' || raw.requested_at.length < 10) problems.push('requested_at must be an ISO timestamp');
-  if (IDENTIFIER_KINDS.indexOf(raw.identifier_kind) === -1) problems.push(`identifier_kind must be one of ${JSON.stringify(IDENTIFIER_KINDS)}`);
-  if (typeof raw.identifier_value !== 'string' || raw.identifier_value === '') problems.push('identifier_value must be a non-empty string');
+  // Echoed back from what Path A sent, so a mismatch here means the table
+  // scored a different company than the one we asked about.
+  if (typeof raw.domain !== 'string' || raw.domain === '') problems.push('domain must be a non-empty string');
   if (raw.model_version !== cfg.model_version) problems.push(`model_version must be "${cfg.model_version}", got ${JSON.stringify(raw.model_version)}`);
 
   // --- resolved ----------------------------------------------------------

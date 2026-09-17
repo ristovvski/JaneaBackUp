@@ -315,8 +315,7 @@ describe('enrichment_facts.schema.json', () => {
     for (const key of factsSchema.required) obj[key] = null;
     obj.request_id = 'req-1';
     obj.org_id = '10001';
-    obj.identifier_kind = 'domain';
-    obj.identifier_value = 'acme.io';
+    obj.domain = 'acme.io';
     return obj;
   };
 
@@ -332,14 +331,30 @@ describe('enrichment_facts.schema.json', () => {
     }
   });
 
-  test('identifier_kind is closed to the three resolveIdentifier kinds', () => {
+  test('the domain is the one identifier, and it is never null', () => {
+    // A row only exists because n8n resolved a domain. Null here would mean
+    // the table built facts for a company it never identified.
     const f = minimal();
-    for (const kind of ['domain', 'linkedin', 'name']) {
-      f.identifier_kind = kind;
-      assert.ok(validateFacts(f), kind);
+    assert.ok(validateFacts(f));
+    f.domain = null;
+    assert.equal(validateFacts(f), false, 'null domain must not validate');
+    f.domain = '';
+    assert.equal(validateFacts(f), false, 'empty domain must not validate');
+  });
+
+  test('the six webhook fields the old contract carried are gone', () => {
+    const f = minimal();
+    for (const key of ['identifier_kind', 'identifier_value']) {
+      assert.ok(!(key in factsSchema.properties), `${key} must not be a fact any more`);
+      f[key] = 'domain';
+      assert.equal(validateFacts(f), false, `${key} must be rejected outright`);
+      delete f[key];
     }
-    f.identifier_kind = 'email';
-    assert.equal(validateFacts(f), false);
+    // The other four survive as enrichment OUTPUTS, nullable, never inputs.
+    for (const key of ['linkedin_url', 'company_name', 'hq_country', 'hq_state']) {
+      f[key] = null;
+      assert.ok(validateFacts(f), `${key} must still be a nullable output`);
+    }
   });
 
   test('a news item must carry a date — Contracting evidence depends on it', () => {
@@ -365,13 +380,20 @@ describe('enrichment_facts.schema.json', () => {
     assert.equal(validateFacts(f), false);
   });
 
-  test('the golden facts fixtures validate', () => {
+  test('the SYNTHETIC day-one fixtures validate against the CURRENT contract', () => {
+    // Only the authored ones. The captures beside them came out of the v5 Clay
+    // Workflow, which sent identifier_kind/identifier_value and could be
+    // driven by a company name; they are evidence of a real run and are
+    // validated against the frozen v5 schema in clay_capture.test.mjs rather
+    // than edited until they satisfy a contract they predate.
     const dir = join(ROOT, 'tests', 'golden', 'facts');
-    const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
+    const files = readdirSync(dir).filter((f) => f.startsWith('SYNTHETIC_') && f.endsWith('.json'));
     assert.ok(files.length >= 3, 'at least the three SYNTHETIC day-one fixtures must exist');
     for (const file of files) {
       const facts = read('tests', 'golden', 'facts', file);
       assert.ok(validateFacts(facts), `${file}: ${errs(validateFacts)}`);
+      assert.equal(typeof facts.domain, 'string', `${file} must carry the one identifier`);
+      assert.ok(!('identifier_kind' in facts), `${file} still carries identifier_kind`);
     }
   });
 });

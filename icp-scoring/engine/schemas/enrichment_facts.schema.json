@@ -6,7 +6,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "request_id", "org_id", "identifier_kind", "identifier_value",
+    "request_id", "org_id",
     "domain", "linkedin_url", "company_name", "hq_country", "hq_state",
     "li_headcount", "li_industry", "li_description", "li_founded", "li_hq",
     "website_summary", "revenue_estimate_usd", "revenue_source",
@@ -18,14 +18,11 @@
     "request_id":   { "type": "string", "minLength": 1, "description": "n8n correlation id; echoed on every artefact" },
     "org_id":       { "type": "string", "minLength": 1, "description": "Pipedrive organization id, as a string" },
     "deal_id":      { "type": ["string", "null"], "description": "Pipedrive deal id that triggered the scoring" },
-    "identifier_kind":  { "enum": ["domain", "linkedin", "name"] },
-    "identifier_value": { "type": "string", "minLength": 1 },
-
-    "domain":       { "type": ["string", "null"], "description": "root domain, already normalized" },
-    "linkedin_url": { "type": ["string", "null"] },
-    "company_name": { "type": ["string", "null"] },
-    "hq_country":   { "type": ["string", "null"] },
-    "hq_state":     { "type": ["string", "null"] },
+    "domain":       { "type": "string", "minLength": 1, "description": "the ONE identifier, sent by n8n and already normalized: lowercase, no scheme, no www., no path. Never null — a row only exists because a domain was resolvable." },
+    "linkedin_url": { "type": ["string", "null"], "description": "enrichment OUTPUT, not an input: what the table found from the domain. v6.0 accepted this from the webhook as a fallback identifier; it no longer is one." },
+    "company_name": { "type": ["string", "null"], "description": "enrichment OUTPUT. v6.0 took it from the webhook to drive a find_by_name lookup; there is no name lookup any more." },
+    "hq_country":   { "type": ["string", "null"], "description": "enrichment OUTPUT; v6.0 took it from the webhook to disambiguate a name lookup." },
+    "hq_state":     { "type": ["string", "null"], "description": "enrichment OUTPUT; v6.0 took it from the webhook to disambiguate a name lookup." },
 
     "li_headcount":    { "type": ["integer", "null"], "minimum": 0 },
     "li_industry":     { "type": ["string", "null"] },

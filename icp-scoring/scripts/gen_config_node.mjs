@@ -109,7 +109,25 @@ export function buildConfig() {
     // every patch rather than merely omitting it, and so the static suite can
     // name the key without a literal.
     f_sales_rep_icp_score: field('sales_rep_icp_score'),
-    fields_never_write: [field('sales_rep_icp_score')],
+    fields_never_write: [field('sales_rep_icp_score'), field('website_url')],
+
+    // READ only, and the second place a human might have put the one thing
+    // this pipeline cannot run without.
+    //
+    // Nik's ruling names "the organization's Website URL". In this account
+    // that label belongs to a CUSTOM field; Pipedrive's own standard field
+    // (key `website`) is labelled plain "Website". Reps fill the custom one
+    // far more often — measured on 2026-09-17 across 21,806 organizations:
+    // 76 had only the standard field, 898 had only this one, 958 had both
+    // (17 of those disagreeing on the root domain). Reading the standard
+    // field alone would send 898 organizations down the "no website" path
+    // while a human was looking at a website on the record.
+    //
+    // So the gate reads the standard field FIRST — it is the one the ruling
+    // names by key, and it is where the 17 disagreements are settled — and
+    // falls back to this one. Never written, hence its place in
+    // fields_never_write above.
+    f_website_url: field('website_url'),
 
     // The five v5 fields were DELETED from the account on 2026-09-17, so there
     // is no deny-list to maintain: the guarantee is now "the patch contains at
@@ -124,6 +142,12 @@ export function buildConfig() {
     auto_score_separator: ' - ',
     label_insufficient: 'n/a - insufficient data',
     label_error: 'n/a - error',
+    // Written by Path A, not Path B: the organization has no usable Website
+    // URL, so it was never sent to the table and there is nothing to score.
+    // Same shape as the other two n/a labels, and like them it fails the
+    // gate's grade-shape test, so the next trigger retries rather than
+    // treating "no website" as a finished answer.
+    label_no_website: 'n/a - no website',
 
     // --- the activity ----------------------------------------------------
     // One per scoring run, marked done so it lands as a record rather than as
@@ -133,6 +157,11 @@ export function buildConfig() {
     activity_type: 'task',
     activity_subject: 'ICP scored',
     activity_max_chars: 900,
+    // The skip has its own subject so a rep scanning the timeline can tell a
+    // grade from a request for one missing field without opening either.
+    activity_subject_skipped: 'ICP not scored',
+    activity_no_website:
+      'Skipped: organization has no Website URL — fill it and re-create the deal or re-run',
 
     // --- policy ----------------------------------------------------------
     rescore_after_days: RUBRIC.rescore_after_days,

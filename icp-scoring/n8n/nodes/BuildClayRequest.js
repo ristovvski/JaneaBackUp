@@ -319,22 +319,46 @@ function slugPlausiblyMatches(slug, normalizedName) {
 
 
 // ---------------------------------------------------------------------------
-// Resolve the identifier Clay will enrich from.
+// The one identifier: the organization's website, normalised to a domain.
+//
+// Mandatory, and "mandatory" is enforced here rather than hoped for. A blank, a
+// typo, "n/a", a bare word with no dot — all of them come back null from the
+// normalizer, and null means this organization is NOT sent to Clay. There is no
+// name lookup and no LinkedIn fallback: a name search that resolves the wrong
+// company of the same name scores a stranger's record and looks exactly like a
+// correct run. Six organizations named Sumersports is what that failure looks
+// like from the inside.
+//
+// A missing website is NOT an error. It is an ordinary outcome with an
+// ordinary result — "n/a - no website" on the record and one activity saying
+// what to do about it — so it returns a decision rather than throwing, and the
+// IF node downstream stays a pure read.
 // ---------------------------------------------------------------------------
-const identifier = resolveIdentifier({
-  name: gate.org_name,
-  website: gate.org_website,
-  linkedin: gate.org_linkedin,
-});
+const domain = normalizeDomain(gate.org_website);
 
-if (!identifier) {
-  // No domain, no LinkedIn, and no usable name. There is nothing to enrich
-  // from, so this is the one case that cannot be scored at all.
-  const error = new Error(
-    `ICP_NO_IDENTIFIER: org ${gate.org_id} has no website, no LinkedIn URL and no usable name`
-  );
-  error.name = 'IcpNoIdentifier';
-  throw error;
+// A directory is not a company. linkedin.com, crunchbase.com, a Wix subdomain
+// — these normalise perfectly and are exactly as wrong as a name lookup: send
+// "linkedin.com" and the table enriches LinkedIn Corporation, then a rep reads
+// a confident A on an account that was never looked at. NON_COMPANY_HOSTS is
+// the same list the Phase 0 coverage audit was measured against.
+const usable = domain !== null && !NON_COMPANY_HOSTS.has(domain);
+
+if (!usable) {
+  let reason;
+  if (!gate.org_website) reason = 'organization has no Website URL';
+  else if (domain === null) reason = `website "${gate.org_website}" is not a usable domain`;
+  else reason = `website "${gate.org_website}" points at ${domain}, which is a directory rather than the company`;
+
+  return [{
+    json: {
+      has_website: false,
+      request_id: gate.request_id,
+      org_id: gate.org_id,
+      deal_id: gate.deal_id,
+      website_raw: gate.org_website === undefined ? null : gate.org_website,
+      reason,
+    },
+  }];
 }
 
 // Pipedrive ids are numbers on the wire, both ways: the table's columns are
@@ -348,43 +372,29 @@ const wireId = (value) => {
   return Number.isFinite(n) ? n : null;
 };
 
-const body = (() => {
-  const out = {
-    request_id: gate.request_id,
-    org_id: wireId(gate.org_id),
-    deal_id: wireId(gate.deal_id),
-    // The table's AI columns use this as "today" for days-open arithmetic on
-    // job postings. It comes from CONFIG rather than from $now here so that
-    // every node in one execution agrees on the same instant — a run that
-    // straddles midnight must not tell the table one date and the audit row
-    // another.
-    requested_at: cfg.now_iso,
-    identifier_kind: identifier.kind,
-    identifier_value: identifier.value,
-    domain: identifier.kind === 'domain' ? identifier.value : normalizeDomain(gate.org_website),
-    linkedin_url: identifier.kind === 'linkedin'
-      ? identifier.value
-      : normalizeLinkedInCompanyUrl(gate.org_linkedin),
-    company_name: gate.org_name === undefined ? null : gate.org_name,
-    hq_country: gate.org_country === undefined ? null : gate.org_country,
-    hq_state: gate.org_state === undefined ? null : gate.org_state,
-    model_version: cfg.model_version,
-    callback_url: cfg.clay_callback_url,
-  };
-  // A domain recovered from a field holding a LinkedIn URL is not a domain.
-  if (out.domain !== null && NON_COMPANY_HOSTS.has(out.domain)) out.domain = null;
-  return out;
-})();
+// Seven keys. Not six, not eight — the table's input columns are these, and a
+// key the table does not have a column for is a key that vanishes silently.
+const body = {
+  org_id: wireId(gate.org_id),
+  deal_id: wireId(gate.deal_id),
+  domain,
+  request_id: gate.request_id,
+  callback_url: cfg.clay_callback_url,
+  // The table's AI columns use this as "today" for days-open arithmetic on job
+  // postings. It comes from CONFIG rather than from $now here so that every
+  // node in one execution agrees on the same instant — a run that straddles
+  // midnight must not tell the table one date and the record another.
+  requested_at: cfg.now_iso,
+  model_version: cfg.model_version,
+};
 
 return [{
   json: {
+    has_website: true,
     request_id: gate.request_id,
     org_id: gate.org_id,
     deal_id: gate.deal_id,
-    identifier_kind: identifier.kind,
-    identifier_value: identifier.value,
-    identifier_confidence: identifier.confidence,
-    identifier_warnings: identifier.warnings,
+    domain,
     clay_url: cfg.clay_engine_url,
     body,
   },

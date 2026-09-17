@@ -45,8 +45,7 @@ function buildEvent(spec) {
     org_id: spec.org_id,
     deal_id: spec.deal_id,
     requested_at: REQUESTED_AT,
-    identifier_kind: spec.identifier_kind,
-    identifier_value: spec.identifier_value,
+    domain: spec.domain,
     resolved: spec.resolved,
     cls_all: spec.cls_all,
     apollo_summary: spec.apollo_summary,
@@ -95,7 +94,7 @@ const CASES = {
   // --- A: Akuvo-shaped fintech, accelerating, must grade A -----------------
   icp_scored_A: {
     request_id: 'req-icp-0001', org_id: 10001, deal_id: 55001,
-    identifier_kind: 'domain', identifier_value: 'akuvo.com',
+    domain: 'akuvo.com',
     resolved: { domain: 'akuvo.com', linkedin_url: 'https://www.linkedin.com/company/akuvo', website: 'http://www.akuvo.com' },
     cls_all: {
       engineering_hiring: hiring({
@@ -132,7 +131,7 @@ const CASES = {
   // --- B_stable: composite >= 75, x0.80 drags it to B ---------------------
   icp_scored_B_stable: {
     request_id: 'req-icp-0002', org_id: 10002, deal_id: 55002,
-    identifier_kind: 'domain', identifier_value: 'qcash.io',
+    domain: 'qcash.io',
     resolved: { domain: 'qcash.io', linkedin_url: 'https://www.linkedin.com/company/qcash', website: 'https://qcash.io' },
     cls_all: {
       engineering_hiring: hiring({
@@ -164,7 +163,7 @@ const CASES = {
   // --- contracting_valid: apollo says it shrank, so Contracting stands ----
   icp_scored_contracting_valid: {
     request_id: 'req-icp-0003', org_id: 10003, deal_id: 55003,
-    identifier_kind: 'domain', identifier_value: 'invoicecloud.com',
+    domain: 'invoicecloud.com',
     resolved: { domain: 'invoicecloud.com', linkedin_url: null, website: 'https://invoicecloud.com' },
     cls_all: {
       engineering_hiring: hiring({
@@ -198,7 +197,7 @@ const CASES = {
   // --- contracting_unbacked: Sol says Contracting, apollo says +0.05 ------
   icp_scored_contracting_unbacked: {
     request_id: 'req-icp-0004', org_id: 10004, deal_id: 55004,
-    identifier_kind: 'domain', identifier_value: 'formstack.com',
+    domain: 'formstack.com',
     resolved: { domain: 'formstack.com', linkedin_url: 'https://www.linkedin.com/company/formstack', website: 'https://formstack.com' },
     cls_all: {
       engineering_hiring: hiring({
@@ -234,7 +233,11 @@ const CASES = {
   // --- insufficient: stage confidence low + missing_inputs ----------------
   icp_scored_insufficient: {
     request_id: 'req-icp-0005', org_id: 10005, deal_id: null,
-    identifier_kind: 'name', identifier_value: 'stealth robotics',
+    // A real domain that enrichment could make nothing of — which is what
+    // insufficient_data means now. v6.0 had this fixture carry a NAME
+    // identifier; a name is no longer sendable, so the shortage has to come
+    // from the enrichment, not from the identifier.
+    domain: 'stealthrobotics.io',
     resolved: { domain: null, linkedin_url: null, website: null },
     cls_all: {
       engineering_hiring: hiring(),
@@ -253,7 +256,7 @@ const CASES = {
   // --- tier2: revenue level 0, employees > 1000 ---------------------------
   icp_scored_tier2: {
     request_id: 'req-icp-0006', org_id: 10006, deal_id: 55006,
-    identifier_kind: 'domain', identifier_value: 'merck.com',
+    domain: 'merck.com',
     resolved: { domain: 'merck.com', linkedin_url: 'https://www.linkedin.com/company/merck', website: 'https://www.merck.com' },
     cls_all: {
       engineering_hiring: hiring({
@@ -283,7 +286,7 @@ const CASES = {
   // --- unknown_vertical: not one of the 17 --------------------------------
   icp_scored_unknown_vertical: {
     request_id: 'req-icp-0007', org_id: 10007, deal_id: 55007,
-    identifier_kind: 'domain', identifier_value: 'example-horizontal.com',
+    domain: 'example-horizontal.com',
     resolved: { domain: 'example-horizontal.com', linkedin_url: null, website: 'https://example-horizontal.com' },
     cls_all: {
       engineering_hiring: hiring({

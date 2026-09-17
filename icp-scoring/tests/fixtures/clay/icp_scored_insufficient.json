@@ -3,8 +3,7 @@
   "org_id": 10005,
   "deal_id": null,
   "requested_at": "2026-09-18T10:42:00Z",
-  "identifier_kind": "name",
-  "identifier_value": "stealth robotics",
+  "domain": "stealthrobotics.io",
   "resolved": {
     "domain": null,
     "linkedin_url": null,

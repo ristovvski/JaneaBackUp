@@ -34,7 +34,7 @@ STEP 2 — the body (paste unchanged)
 
 /* ---8<--- BEGIN FACTS BODY (generated; paste unchanged) --- */
 // Generated from engine/schemas/enrichment_facts.schema.json.
-// 26 keys, 25 of them required by the schema.
+// 24 keys, 23 of them required by the schema.
 //
 // EVERY key is present on EVERY row, with null where enrichment found nothing.
 // That is not tidiness: the classifier preamble tells the model to read null as
@@ -46,13 +46,11 @@ return {
     request_id: W['Request Id'] ?? null,                  // string, from the webhook
     org_id: W['Org Id'] ?? null,                          // string, from the webhook
     deal_id: W['Deal Id'] ?? null,                        // string, from the webhook   // optional
-    identifier_kind: W['Identifier Kind'] ?? null,        // enum, from the webhook
-    identifier_value: W['Identifier Value'] ?? null,      // string, from the webhook
     domain: W['Domain'] ?? null,                          // string, from the webhook
-    linkedin_url: W['Linkedin Url'] ?? null,              // string, from the webhook
-    company_name: W['Company Name'] ?? null,              // string, from the webhook
-    hq_country: W['Hq Country'] ?? null,                  // string, from the webhook
-    hq_state: W['Hq State'] ?? null,                      // string, from the webhook
+    linkedin_url: E.linkedin_url ?? null,                 // string
+    company_name: E.company_name ?? null,                 // string
+    hq_country: E.hq_country ?? null,                     // string
+    hq_state: E.hq_state ?? null,                         // string
     li_headcount: E.li_headcount ?? null,                 // integer
     li_industry: E.li_industry ?? null,                   // string
     li_description: E.li_description ?? null,             // string
@@ -98,19 +96,17 @@ and the identical formula produces a genuine graded result.
 KEYS, AND WHERE EACH COMES FROM
 -------------------------------
 
-From the webhook (10):
+From the webhook (4):
   request_id               <- Webhook."Request Id"
   org_id                   <- Webhook."Org Id"
   deal_id                  <- Webhook."Deal Id"
-  identifier_kind          <- Webhook."Identifier Kind"
-  identifier_value         <- Webhook."Identifier Value"
   domain                   <- Webhook."Domain"
-  linkedin_url             <- Webhook."Linkedin Url"
-  company_name             <- Webhook."Company Name"
-  hq_country               <- Webhook."Hq Country"
-  hq_state                 <- Webhook."Hq State"
 
-From enrichment (16) — Phase 2:
+From enrichment (20) — Phase 2:
+  linkedin_url
+  company_name
+  hq_country
+  hq_state
   li_headcount
   li_industry
   li_description

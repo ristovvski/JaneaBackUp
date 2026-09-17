@@ -90,7 +90,7 @@ describe('validateEvent accepts what the table is supposed to send', () => {
 describe('shape', () => {
   test('a missing required key is named', () => {
     for (const key of [
-      'request_id', 'org_id', 'requested_at', 'identifier_kind', 'identifier_value',
+      'request_id', 'org_id', 'requested_at', 'domain',
       'resolved', 'cls_all', 'apollo_summary', 'model_version',
     ]) {
       one((e) => { delete e[key]; }, new RegExp(`missing "${key}"`));

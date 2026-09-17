@@ -29,7 +29,13 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (...p) => JSON.parse(readFileSync(join(ROOT, ...p), 'utf8'));
 
 const ajv = new Ajv({ strict: false, allErrors: true });
-const validateFacts = ajv.compile(read('engine', 'schemas', 'enrichment_facts.schema.json'));
+// Same reasoning as the event schema below: these fact sets were produced by
+// the v5 Clay WORKFLOW, whose webhook carried identifier_kind/identifier_value
+// and could be driven by a company NAME. v6 sends one identifier, the domain,
+// so a v5 capture cannot satisfy the v6 facts schema and should not be asked
+// to — least of all by editing the capture until it does. The v5 schema is
+// frozen in engine/schemas/v5/ for exactly this.
+const validateFacts = ajv.compile(read('engine', 'schemas', 'v5', 'enrichment_facts.schema.json'));
 // The captures in tests/golden/events/ were produced by the Clay WORKFLOW under
 // model v5, which the v6 table replaces. They are kept because they are the
 // only evidence of what a live enrichment waterfall and seven live classifiers

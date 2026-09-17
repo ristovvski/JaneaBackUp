@@ -3,8 +3,7 @@
   "org_id": 10004,
   "deal_id": 55004,
   "requested_at": "2026-09-18T10:42:00Z",
-  "identifier_kind": "domain",
-  "identifier_value": "formstack.com",
+  "domain": "formstack.com",
   "resolved": {
     "domain": "formstack.com",
     "linkedin_url": "https://www.linkedin.com/company/formstack",

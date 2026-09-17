@@ -4,8 +4,6 @@
   "request_id": "synthetic-merck",
   "org_id": "10003",
   "deal_id": null,
-  "identifier_kind": "domain",
-  "identifier_value": "merck.com",
   "domain": "merck.com",
   "linkedin_url": "https://www.linkedin.com/company/merck",
   "company_name": "Merck",

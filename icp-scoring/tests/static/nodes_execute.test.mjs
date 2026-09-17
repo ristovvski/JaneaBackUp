@@ -16,7 +16,7 @@ import {
   runCodeNode, readNode, makeConfig, orgFixture, clayFixture, pipedriveFixture, NOW_ISO,
 } from './harness.mjs';
 import { score } from '../../engine/scoring.mjs';
-import { resolveIdentifier } from '../../engine/normalize.mjs';
+import { normalizeDomain } from '../../engine/normalize.mjs';
 import { activationStateFor } from '../../engine/activation_guard.mjs';
 
 /** Every fixture that is supposed to validate. The malformed one is not here. */
@@ -31,6 +31,7 @@ const SRC = {
   Normalize: readNode('Normalize'),
   IdempotencyGate: readNode('IdempotencyGate'),
   BuildClayRequest: readNode('BuildClayRequest'),
+  BuildNoWebsiteWrite: readNode('BuildNoWebsiteWrite'),
   ParseScored: readNode('ParseScored'),
   Score: readNode('Score'),
   BuildOrgPatch: readNode('BuildOrgPatch'),
@@ -389,6 +390,52 @@ describe('IdempotencyGate', () => {
     }
   });
 
+  test('the website is read from the standard field first, then the custom one', () => {
+    // The ruling names "the organization's Website URL". In this account that
+    // label is a CUSTOM field, while Pipedrive's own `website` is labelled
+    // plain "Website", and reps have filled both. Reading only one of them
+    // would tell 898 organizations they have no website while a human was
+    // looking at one on the record.
+    const read = (website, custom) => {
+      const normalized = normalize(dedupeA(pipedriveFixture('deal_added.v2.json'), {})[0])[0].json;
+      const { org } = orgFixture('org_full.json', cfg);
+      org.website = website;
+      org.custom_fields = { ...(org.custom_fields || {}), [cfg.f_website_url]: custom };
+      return gate(normalized, org)[0].json;
+    };
+
+    let out = read('https://akuvo.com', null);
+    assert.equal(out.org_website, 'https://akuvo.com');
+    assert.equal(out.org_website_source, 'website');
+
+    out = read(null, 'https://www.intellistack.com/');
+    assert.equal(out.org_website, 'https://www.intellistack.com/');
+    assert.equal(out.org_website_source, 'website_url');
+
+    // Both filled and disagreeing: the standard field wins, because it is the
+    // one the ruling names by key and the tie has to break somewhere.
+    out = read('https://akuvo.com', 'https://www.intellistack.com/');
+    assert.equal(out.org_website, 'https://akuvo.com');
+    assert.equal(out.org_website_source, 'website');
+
+    for (const [a, b] of [[null, null], ['', ''], ['   ', '  ']]) {
+      out = read(a, b);
+      assert.equal(out.org_website, null);
+      assert.equal(out.org_website_source, null);
+    }
+  });
+
+  test('the fallback reaches the Clay request, so a custom-field org is scored', () => {
+    const normalized = normalize(dedupeA(pipedriveFixture('deal_added.v2.json'), {})[0])[0].json;
+    const { org } = orgFixture('org_full.json', cfg);
+    org.website = null;
+    org.custom_fields = { ...(org.custom_fields || {}), [cfg.f_website_url]: 'https://www.intellistack.com/' };
+    const [gateOut] = gate(normalized, org);
+    const out = clayRequest(gateOut.json)[0].json;
+    assert.equal(out.has_website, true);
+    assert.equal(out.body.domain, 'intellistack.com');
+  });
+
   test('it reads only the two fields that still exist', () => {
     const source = readNode('IdempotencyGate');
     for (const key of ['f_icp_calculated', 'f_icp_score', 'f_icp_scored_at', 'f_icp_model_version', 'f_icp_final']) {
@@ -406,97 +453,54 @@ describe('IdempotencyGate', () => {
 });
 
 // ==========================================================================
-describe('BuildClayRequest — identifier priority', () => {
-  const requestFor = (fixtureName) => {
+describe('BuildClayRequest — one identifier, and it is the website', () => {
+  const requestFor = (fixtureName, mutate) => {
     const normalized = normalize(dedupeA(pipedriveFixture('deal_added.v2.json'), {})[0])[0].json;
     const { org } = orgFixture(fixtureName, cfg);
+    if (mutate) mutate(org);
     const [gateOut] = gate(normalized, org);
     return clayRequest(gateOut.json)[0].json;
   };
 
-  test('org_full -> domain, high confidence', () => {
+  test('an org WITH a website sends a domain and nothing else identifying', () => {
     const out = requestFor('org_full.json');
-    assert.equal(out.identifier_kind, 'domain');
-    assert.equal(out.identifier_value, 'akuvo.com');
-    assert.equal(out.identifier_confidence, 'high');
+    assert.equal(out.has_website, true);
+    assert.equal(out.domain, 'akuvo.com');
+    assert.equal(out.body.domain, 'akuvo.com');
   });
 
-  test('org_no_website -> linkedin, high confidence', () => {
-    const out = requestFor('org_no_website.json');
-    assert.equal(out.identifier_kind, 'linkedin');
-    assert.equal(out.identifier_value, 'https://www.linkedin.com/company/qcash-financial');
-    assert.equal(out.identifier_confidence, 'high');
-  });
-
-  test('org_no_identifiers -> name, LOW confidence', () => {
-    const out = requestFor('org_no_identifiers.json');
-    assert.equal(out.identifier_kind, 'name');
-    assert.equal(out.identifier_value, 'stealth robotics');
-    assert.equal(out.identifier_confidence, 'low');
-  });
-
-  test('a name-only org still carries the three fields find_by_name needs', () => {
-    // The table's find_by_name step has nothing but these. If the body omitted
-    // company_name the lookup could not run at all, and without the country and
-    // state it would resolve the wrong company of the same name — which scores
-    // a stranger's CRM record and looks exactly like a correct run.
-    const out = requestFor('org_no_identifiers.json');
-    assert.equal(out.identifier_kind, 'name');
-    assert.ok(Object.prototype.hasOwnProperty.call(out.body, 'company_name'));
-    assert.ok(Object.prototype.hasOwnProperty.call(out.body, 'hq_country'));
-    assert.ok(Object.prototype.hasOwnProperty.call(out.body, 'hq_state'));
-    assert.equal(typeof out.body.company_name, 'string');
-    assert.ok(out.body.company_name.length > 0);
-  });
-
-  test('every enrichment key is present even when null — omission is not absence', () => {
-    // Clay's facts_json must be able to tell "enrichment did not find it" from
-    // "we never asked". An omitted key destroys that distinction, so the body
-    // sends the full key set on every path.
+  test('the body is EXACTLY seven keys — the table has a column for each', () => {
+    // Not six, not eight. A key the table has no column for vanishes silently,
+    // and a column with no key arrives empty on every row; either way nobody
+    // finds out until a grade is wrong.
     const KEYS = [
-      'request_id', 'org_id', 'deal_id', 'requested_at',
-      'identifier_kind', 'identifier_value',
-      'domain', 'linkedin_url', 'company_name', 'hq_country', 'hq_state',
-      'model_version', 'callback_url',
+      'org_id', 'deal_id', 'domain', 'request_id',
+      'callback_url', 'requested_at', 'model_version',
     ];
-    for (const fixtureName of ['org_full.json', 'org_no_website.json', 'org_no_identifiers.json']) {
-      const out = requestFor(fixtureName);
-      assert.deepEqual(Object.keys(out.body).sort(), [...KEYS].sort(), fixtureName);
+    const out = requestFor('org_full.json');
+    assert.deepEqual(Object.keys(out.body).sort(), [...KEYS].sort());
+  });
+
+  test('the six fields the old contract sent are gone from the body', () => {
+    // identifier_kind and identifier_value made a name lookup expressible;
+    // company_name, hq_country and hq_state were what a name lookup needed to
+    // disambiguate. With no name lookup there is nothing to disambiguate, and
+    // linkedin_url was a second identifier for the same company.
+    const out = requestFor('org_full.json');
+    for (const key of [
+      'identifier_kind', 'identifier_value', 'linkedin_url',
+      'company_name', 'hq_state', 'hq_country',
+    ]) {
+      assert.ok(!(key in out.body), `${key} must not be in the Clay payload`);
     }
   });
 
-  test('the spliced normalizer agrees with engine/normalize.mjs', () => {
-    for (const fixtureName of ['org_full.json', 'org_no_website.json', 'org_no_identifiers.json']) {
-      const { org } = orgFixture(fixtureName, cfg);
-      const expected = resolveIdentifier({
-        name: org.name, website: org.website, linkedin: org.linkedin,
-      });
-      const out = requestFor(fixtureName);
-      assert.equal(out.identifier_kind, expected.kind, fixtureName);
-      assert.equal(out.identifier_value, expected.value, fixtureName);
-      assert.equal(out.identifier_confidence, expected.confidence, fixtureName);
-      assert.deepEqual(out.identifier_warnings, expected.warnings, fixtureName);
-    }
-  });
-
-  test('a LinkedIn URL in the website field never becomes the domain', () => {
-    const normalized = normalize(dedupeA(pipedriveFixture('deal_added.v2.json'), {})[0])[0].json;
-    const { org } = orgFixture('org_full.json', cfg);
-    org.website = 'https://www.linkedin.com/company/concertai';
-    org.linkedin = null;
-    const [gateOut] = gate(normalized, org);
-    const out = clayRequest(gateOut.json)[0].json;
-    assert.equal(out.identifier_kind, 'linkedin');
-    assert.equal(out.body.domain, null, 'linkedin.com must not be sent as the domain');
-    assert.equal(out.identifier_confidence, 'low');
-  });
-
-  test('nulls are SENT as null, never omitted — Clay needs the distinction', () => {
-    const out = requestFor('org_no_identifiers.json');
-    for (const key of ['domain', 'linkedin_url', 'hq_country', 'hq_state']) {
-      assert.ok(key in out.body, `${key} must be present`);
-      assert.equal(out.body[key], null);
-    }
+  test('ids go over the wire as numbers, everything else as it stands', () => {
+    const out = requestFor('org_full.json');
+    assert.equal(typeof out.body.org_id, 'number');
+    assert.equal(typeof out.body.deal_id, 'number');
+    assert.equal(out.body.requested_at, cfg.now_iso);
+    assert.equal(out.body.model_version, cfg.model_version);
   });
 
   test('the callback URL comes from CONFIG, not from a literal', () => {
@@ -505,12 +509,173 @@ describe('BuildClayRequest — identifier priority', () => {
     assert.equal(out.clay_url, cfg.clay_engine_url);
   });
 
-  test('an org with nothing usable throws a typed error', () => {
+  test('the domain is normalised: lowercase, no scheme, no www., no path', () => {
+    for (const [raw, expected] of [
+      ['https://www.Akuvo.com/careers', 'akuvo.com'],
+      ['WWW.AKUVO.COM', 'akuvo.com'],
+      ['http://akuvo.com/', 'akuvo.com'],
+      ['akuvo.com', 'akuvo.com'],
+    ]) {
+      const out = requestFor('org_full.json', (org) => { org.website = raw; });
+      assert.equal(out.body.domain, expected, raw);
+    }
+  });
+
+  // ---- the no-website decision -------------------------------------------
+  //
+  // A missing website is NOT an error and NOT a fallback. It is an ordinary
+  // outcome that produces an ordinary result, and the node says so by
+  // returning a decision instead of throwing.
+
+  test('an org with NO website is not sent to Clay at all', () => {
+    const out = requestFor('org_no_identifiers.json');
+    assert.equal(out.has_website, false);
+    assert.ok(!('body' in out), 'there must be no payload to post');
+    assert.ok(!('clay_url' in out), 'and nothing to post it to');
+    assert.equal(out.website_raw, null);
+    assert.match(out.reason, /no Website URL/);
+  });
+
+  test('an org with a LinkedIn URL but no website is not sent either', () => {
+    // v6.0 fell back to the LinkedIn slug here. A LinkedIn company page is a
+    // second identifier for the same company and the table cannot enrich from
+    // one, so the fallback bought nothing and hid a missing field.
+    const out = requestFor('org_no_website.json');
+    assert.equal(out.has_website, false);
+    assert.ok(!('body' in out));
+  });
+
+  test('a malformed website is treated as missing, and quotes what was there', () => {
+    for (const raw of ['akuvo', 'not a domain', '   ', 'n/a', '555-0134', 'co.uk']) {
+      const out = requestFor('org_full.json', (org) => { org.website = raw; });
+      assert.equal(out.has_website, false, raw);
+      assert.ok(!('body' in out), raw);
+      if (raw.trim() !== '') {
+        assert.equal(out.website_raw, raw, raw);
+        assert.match(out.reason, /is not a usable domain/, raw);
+      }
+    }
+  });
+
+  test('a directory in the website field is not a company domain', () => {
+    // These normalise perfectly — that is the trap. "linkedin.com" would send
+    // the table off to enrich LinkedIn Corporation and come back with a
+    // confident grade for a company nobody looked at.
+    for (const raw of [
+      'https://www.linkedin.com/company/concertai',
+      'https://www.crunchbase.com/organization/akuvo',
+      'https://akuvo.wixsite.com/home',
+      'https://www.facebook.com/akuvo',
+    ]) {
+      const out = requestFor('org_full.json', (org) => {
+        org.website = raw;
+        org.linkedin = null;
+      });
+      assert.equal(out.has_website, false, raw);
+      assert.match(out.reason, /directory rather than the company/, raw);
+    }
+  });
+
+  test('either way it carries the three ids the rest of Path A needs', () => {
+    for (const fixtureName of ['org_full.json', 'org_no_identifiers.json']) {
+      const out = requestFor(fixtureName);
+      assert.ok(out.request_id, fixtureName);
+      assert.ok(out.org_id, fixtureName);
+      assert.ok(Object.prototype.hasOwnProperty.call(out, 'deal_id'), fixtureName);
+    }
+  });
+
+  test('the spliced normalizer agrees with engine/normalize.mjs', () => {
+    for (const raw of ['https://www.Akuvo.com/careers', 'qcash.io', 'akuvo', '', 'co.uk']) {
+      const expected = normalizeDomain(raw);  // none of these is a directory host
+      const out = requestFor('org_full.json', (org) => { org.website = raw; });
+      assert.equal(out.has_website, expected !== null, raw);
+      if (expected !== null) assert.equal(out.body.domain, expected, raw);
+    }
+  });
+
+  test('the node never reaches for a name or a LinkedIn slug', () => {
+    // The rule is easier to keep as "the source does not contain the call"
+    // than as "no test happens to cover the path that would make it".
+    const source = readNode('BuildClayRequest');
+    // Everything after the spliced normalizer — the normalizer still DEFINES
+    // those helpers, and other callers still use them; what matters is that
+    // this node's own decision never calls one.
+    const body = source.slice(source.indexOf('// The one identifier'));
+    assert.ok(!/resolveIdentifier\(/.test(body), 'resolveIdentifier must not be called');
+    assert.ok(!/normalizeCompanyName\(/.test(body), 'normalizeCompanyName must not be called');
+    assert.ok(!/normalizeLinkedInCompanyUrl\(/.test(body), 'the LinkedIn fallback must not be called');
+  });
+});
+
+// ==========================================================================
+describe('BuildNoWebsiteWrite — the skip leaves the same footprint as a score', () => {
+  const skipFor = (fixtureName, mutate, config = cfg) => {
     const normalized = normalize(dedupeA(pipedriveFixture('deal_added.v2.json'), {})[0])[0].json;
-    const { org } = orgFixture('org_no_identifiers.json', cfg);
-    org.name = '';
+    const { org } = orgFixture(fixtureName, config);
+    if (mutate) mutate(org);
     const [gateOut] = gate(normalized, org);
-    assert.throws(() => clayRequest(gateOut.json), /ICP_NO_IDENTIFIER/);
+    const decision = clayRequest(gateOut.json)[0].json;
+    return runCodeNode(SRC.BuildNoWebsiteWrite, {
+      input: [decision],
+      nodes: { CONFIG: config, IdempotencyGate: gateOut.json },
+    })[0].json;
+  };
+
+  test('it writes the SAME two fields a scored run writes, together', () => {
+    const out = skipFor('org_no_identifiers.json');
+    assert.deepEqual(Object.keys(out.patch), ['custom_fields']);
+    assert.deepEqual(
+      Object.keys(out.patch.custom_fields).sort(),
+      [...cfg.fields_written].sort()
+    );
+    assert.equal(out.patch.custom_fields[cfg.f_auto_icp_score], 'n/a - no website');
+    assert.equal(out.patch.custom_fields[cfg.f_auto_icp_scored_at], NOW_ISO.slice(0, 10));
+  });
+
+  test('Sales Rep ICP Score is not in the patch', () => {
+    const out = skipFor('org_no_identifiers.json');
+    assert.ok(!(cfg.f_sales_rep_icp_score in out.patch.custom_fields));
+  });
+
+  test('the activity says the one thing a human has to do', () => {
+    const out = skipFor('org_no_identifiers.json');
+    assert.equal(out.subject, cfg.activity_subject_skipped);
+    assert.equal(out.type, cfg.activity_type);
+    assert.equal(out.body, cfg.activity_no_website);
+    assert.match(out.body, /Website URL/);
+    assert.ok(out.chars <= cfg.activity_max_chars);
+  });
+
+  test('a website that is present but unusable is quoted back', () => {
+    const out = skipFor('org_full.json', (org) => { org.website = 'akuvo'; });
+    assert.match(out.body, /^Skipped: organization has no Website URL/);
+    assert.match(out.body, /reads "akuvo"/);
+    assert.ok(out.chars <= cfg.activity_max_chars);
+  });
+
+  test('the second deal the same day writes nothing, and still explains itself', () => {
+    const out = skipFor('org_no_identifiers.json', (org) => {
+      org.custom_fields = {
+        ...(org.custom_fields || {}),
+        [cfg.f_auto_icp_score]: 'n/a - no website',
+        [cfg.f_auto_icp_scored_at]: NOW_ISO.slice(0, 10),
+      };
+    });
+    assert.equal(out.patch_is_empty, true);
+    assert.deepEqual(out.patch, {});
+    assert.equal(out.body, cfg.activity_no_website);
+  });
+
+  test('it refuses to run for an organization that HAS a domain', () => {
+    const normalized = normalize(dedupeA(pipedriveFixture('deal_added.v2.json'), {})[0])[0].json;
+    const { org } = orgFixture('org_full.json', cfg);
+    const [gateOut] = gate(normalized, org);
+    const decision = clayRequest(gateOut.json)[0].json;
+    assert.throws(() => runCodeNode(SRC.BuildNoWebsiteWrite, {
+      input: [decision],
+      nodes: { CONFIG: cfg, IdempotencyGate: gateOut.json },
+    }), /ICP_WRONG_BRANCH/);
   });
 });
 
@@ -937,7 +1102,7 @@ describe('BuildActivity — one activity, in plain words', () => {
 describe('BuildRunSummary', () => {
   const EXPECTED_COLUMNS = [
     'ts', 'requested_at', 'request_id', 'execution_id', 'trigger', 'deal_id', 'org_id',
-    'identifier_kind', 'identifier_value', 'model_version',
+    'domain', 'model_version',
     'industry_vertical', 'industry_level', 'stage_level', 'type_level',
     'geo_level', 'revenue_level', 'revenue_source', 'buying_level',
     'eng_open', 'eng_open_60d_plus',
@@ -965,7 +1130,7 @@ describe('BuildRunSummary', () => {
     const out = scored('icp_scored_A.json');
     const [row] = runSummary(out);
     assert.deepEqual(Object.keys(row.json), EXPECTED_COLUMNS);
-    assert.equal(EXPECTED_COLUMNS.length, 38);
+    assert.equal(EXPECTED_COLUMNS.length, 37);
   });
 
   test('a scored run fills the score columns', () => {

@@ -25,6 +25,30 @@ const fetched = $input.first().json;
 const org = fetched.data || fetched;
 const custom = org.custom_fields || {};
 
+// ---------------------------------------------------------------------------
+// The one identifier, read from the two places a human might have put it.
+//
+// Nik's ruling names "the organization's Website URL". In THIS account that
+// label belongs to a custom field; Pipedrive's own standard field (key
+// `website`) is labelled plain "Website" — so the ruling's words and its
+// parenthetical point at two different fields, and reps have used both.
+// Measured 2026-09-17 over 21,806 organizations: 76 had only the standard
+// field, 898 had only the custom one, 958 had both. Reading the standard field
+// alone would have told 898 organizations they have no website while a human
+// was looking at one on the record.
+//
+// The standard field wins where both are filled — it is the field the ruling
+// names by key, and 17 of the 958 disagree on the root domain, so the tie has
+// to break somewhere and it breaks on Pipedrive's own. Neither is written.
+// ---------------------------------------------------------------------------
+const trimmed = (value) => (typeof value === 'string' && value.trim() !== '' ? value.trim() : null);
+const standardWebsite = trimmed(org.website);
+const customWebsite = trimmed(custom[cfg.f_website_url]);
+const website = standardWebsite || customWebsite;
+let websiteSource = null;
+if (standardWebsite) websiteSource = 'website';
+else if (customWebsite) websiteSource = 'website_url';
+
 const rawAutoScore = custom[cfg.f_auto_icp_score];
 const rawScoredAt = custom[cfg.f_auto_icp_scored_at];
 const autoScore = rawAutoScore === null || rawAutoScore === undefined
@@ -82,7 +106,8 @@ return [{
     deal_id: n.deal_id,
 
     org_name: org.name || null,
-    org_website: org.website || null,
+    org_website: website,
+    org_website_source: websiteSource,
     org_linkedin: org.linkedin || null,
     org_country: (org.address && org.address.country) || null,
     org_state: (org.address && org.address.admin_area_level_1) || null,

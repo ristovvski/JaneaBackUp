@@ -1412,3 +1412,162 @@ production export is the same source with different environment variables.
 - **18 of the 21 sheet accounts have no captured facts**, so the per-component
   agreement table is measured on three. The harness names the other eighteen
   rather than passing over them.
+
+---
+
+## 16. One identifier, and it is the website — 2026-09-17
+
+Nik's ruling: the organization's Website URL is the identifier, it is
+mandatory, and there are no name-based lookups ever. This section is what
+changed, one live finding that changes how the ruling has to be implemented in
+*this* account, and the four statics proved on the deployed workflow.
+
+### The payload is seven keys
+
+```json
+{
+  "org_id":        22586,
+  "deal_id":       2273,
+  "domain":        "intellistack.com",
+  "request_id":    "req-live-1789650421290",
+  "callback_url":  "<n8n Path B webhook URL, from CONFIG>",
+  "requested_at":  "2026-09-17T13:07:02.750+00:00",
+  "model_version": "v6"
+}
+```
+
+Verbatim from execution **60534**, the live re-fire on deal 2273 / org 22586.
+`POST Clay` returned `{"success": true}`.
+
+Gone from it: `identifier_kind`, `identifier_value`, `linkedin_url`,
+`company_name`, `hq_state`, `hq_country`. The first two expressed *score this
+row from a company NAME*, which the pipeline can no longer do; the last four
+existed only to make a name lookup land on the right company of that name. The
+domain is normalised in n8n before it is sent — lowercase, no scheme, no
+`www.`, no path — so Clay never has to agree with n8n about what a domain is.
+
+**The Clay table's input columns have to follow.** `engine/clay_table_spec.md`
+and the regenerated `engine/clay_facts_formula.txt` are the current contract:
+four webhook keys (`request_id`, `org_id`, `deal_id`, `domain`) instead of ten,
+and `linkedin_url` / `company_name` / `hq_country` / `hq_state` demoted from
+webhook inputs to enrichment **outputs**. Those six columns should be deleted
+in the Clay UI rather than left to arrive empty on every row. That edit is not
+something this repo can make: the CLI that built the Clay Workflow is not
+installed in this environment and Clay's public API does not expose table
+schema.
+
+### The finding: "Website URL" is not the field the ruling names
+
+The ruling says *the organization's Website URL (Pipedrive native `website`
+field)*. In this account those are **two different fields**:
+
+| label in Pipedrive | key | kind |
+|---|---|---|
+| Website | `website` | Pipedrive's own standard field |
+| **Website URL** | `7ef47bd7…` | a **custom** field that already existed |
+
+Nik filled the custom one on org 22586. Reading only the standard field would
+have sent that organization down the no-website path while a human was looking
+at a website on the record.
+
+Measured across **all 21,806 organizations** on 2026-09-17:
+
+| | organizations |
+|---|---|
+| standard `website` only | 76 |
+| custom **Website URL** only | **898** |
+| both | 958 (17 disagree on the root domain) |
+| neither | 19,874 |
+
+So `IdempotencyGate` reads the standard field **first** — it is the field the
+ruling names by key, and it settles the 17 disagreements — and falls back to
+the custom one. It records which it used (`org_website_source`). Neither field
+is ever written: the custom key is in `CONFIG.fields_never_write` beside the
+rep's own Sales Rep ICP Score, and a static test walks every node to prove
+nothing else so much as names it.
+
+This is still **one identifier**. It is one value; there are two places a human
+might have typed it. It is not a fallback to a different kind of identifier,
+which is the thing the ruling forbids.
+
+**For Nik:** "make it required" has to name one of these two. If it is the
+custom **Website URL**, nothing more is needed. If it is the standard
+**Website**, 898 organizations need their value copied across before the
+requirement means anything.
+
+### No website: what a rep sees
+
+An organization with no usable domain is **not sent to Clay at all** — no
+request, no credit, no grade derived from a company we guessed at. "No usable
+domain" covers four cases, all of them ordinary rather than errors: the field
+is empty; it is unparseable (`akuvo`, `n/a`, a phone number); it is a directory
+rather than the company (`linkedin.com`, `crunchbase.com`, a Wix subdomain);
+or both website fields are blank.
+
+The run then leaves **the same footprint a scored run leaves**: the same two
+organization fields, written together, and one activity.
+
+```
+Auto-ICP Score     n/a - no website
+Auto-ICP Scored At 2026-09-17
+activity           ICP not scored  (task, done)
+                   Skipped: organization has no Website URL — fill it and
+                   re-create the deal or re-run
+```
+
+When the field is filled but unusable, a second sentence quotes it back —
+`The Website URL on the record reads "akuvo", which is not a usable web
+address.` — because telling someone to fill a field they can see is already
+filled reads as a bug in us.
+
+`n/a - no website` fails `IdempotencyGate`'s grade-shape test, so it is not a
+finished answer: the next deal on that organization re-runs, and once the
+website is filled it scores normally.
+
+### The four statics, proved on the deployed workflow
+
+Executions **60534**, **60535** and **60536**, DEV workflow `TkMHPH8y2SRUuq4s`,
+37 nodes, no red node.
+
+| static | execution | result |
+|---|---|---|
+| org **with** a website → payload carries `domain`, nothing else identifying | 60534 | 7 keys, `domain: "intellistack.com"`, Clay `{"success": true}` |
+| org **without** → no Clay call, `n/a - no website` written, activity explains | 60535 | `POST Clay` never ran; `PATCH organization (no website)` + `POST activity (no website)` (id 46832) |
+| malformed website (no dot, spaces, a directory) → treated as missing | tests | `BuildClayRequest` returns `has_website: false` for `akuvo`, `not a domain`, `n/a`, `555-0134`, `co.uk`, `linkedin.com/company/…`, `crunchbase.com/…`, a Wix subdomain |
+| second run the same day → no second field write, still exactly one activity | 60536 | `patch_is_empty: true`, `PATCH organization (no website)` did not run, one activity (id 46833) |
+
+60535 and 60536 needed an organization with no website, so org 22586's Website
+URL was **blanked, fired against twice, and restored** — the field is back to
+`https://www.intellistack.com/`, Auto-ICP Score and Auto-ICP Scored At are back
+to null, and activities 46832 and 46833 were deleted. The record is as it was
+before the test, except that execution 60534's Clay row is in flight.
+
+### Deploying
+
+`scripts/n8n_deploy.mjs` is new. It reads the webhook paths, the error workflow
+id and the three environment URLs back **out of the live workflow** rather than
+out of a file or the operator's shell — a webhook path is a credential, it
+already lives in n8n, and a redeploy that silently rotates one breaks the
+Pipedrive subscription without saying so. Credentials are resolved by type
+against whatever the live workflow attaches, which is what stops n8n rejecting
+a whole PUT over a new node carrying a credential name the instance does not
+know.
+
+```
+node scripts/n8n_deploy.mjs <workflow-id> [--dry-run]
+```
+
+### Tests
+
+642 passing, 0 failing. New or rewritten: the whole `BuildClayRequest` block
+(one identifier, the seven-key body, the six removed keys, directory hosts, the
+normalisation cases), a `BuildNoWebsiteWrite` block (the pair write, the
+activity, the quote-back, the same-day no-op, the wrong-branch guard), the
+graph statics for two writers and three activity nodes on mutually exclusive
+paths, and the gate's two-field read.
+
+The v5 Clay captures in `tests/golden/facts/` were **not** edited to fit the
+new contract. They are evidence of a real enrichment run under a contract that
+carried `identifier_kind`, so `engine/schemas/v5/enrichment_facts.schema.json`
+is frozen for them, exactly as the v5 event schema already was. The authored
+`SYNTHETIC_*` fixtures were migrated, because those are fixtures.

@@ -6,8 +6,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "request_id", "org_id", "requested_at",
-    "identifier_kind", "identifier_value",
+    "request_id", "org_id", "requested_at", "domain",
     "resolved", "cls_all", "apollo_summary", "model_version"
   ],
   "properties": {
@@ -16,11 +15,10 @@
     "deal_id":     { "type": ["integer", "null"] },
     "requested_at": { "type": "string", "minLength": 10, "description": "when Path A asked; the table's \"today\" for days-open arithmetic, and what the Contracting guard measures evidence age against" },
 
-    "identifier_kind":  { "enum": ["domain", "linkedin", "name"] },
-    "identifier_value": { "type": "string", "minLength": 1 },
+    "domain": { "type": "string", "minLength": 1, "description": "the ONE identifier, echoed back from the Path A request. The organization's Pipedrive Website URL normalised to a bare host: lowercase, no scheme, no www., no path. There is no name or LinkedIn fallback — an organization with no usable website is never sent to the table, so every event that arrives has one." },
 
     "resolved": {
-      "description": "What the table resolved the identifier to. Path B fills the org's website and LinkedIn URL from here when the record has none.",
+      "description": "What the table resolved the domain to. Trace only: Path B writes two organization fields and nothing else, so none of this reaches Pipedrive. Kept because a run that scored the wrong company is diagnosed from here.",
       "type": "object",
       "additionalProperties": false,
       "required": ["domain", "linkedin_url", "website"],

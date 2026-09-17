@@ -459,8 +459,22 @@ describe('continueOnFail is allow-listed', () => {
     const branch = ['BuildErrorContext', 'Slack alert error', 'POST activity error'];
     for (const name of branch) assert.ok(byName.get(name), `${name} must exist`);
     const patchers = wf.nodes.filter((n) => n.parameters && n.parameters.method === 'PATCH');
-    assert.deepEqual(patchers.map((n) => n.name), ['PATCH organization'],
-      'exactly one PATCH node in the whole workflow, and it is on the happy path');
+    assert.deepEqual(
+      patchers.map((n) => n.name).sort(),
+      ['PATCH organization', 'PATCH organization (no website)'],
+      'two PATCH nodes in the whole workflow, neither of them on the error branch'
+    );
+    // Neither is reachable from the error branch: an error writes nothing.
+    for (const name of ['BuildErrorContext', 'Slack alert error', 'POST activity error']) {
+      for (const output of (wf.connections[name] || { main: [] }).main) {
+        for (const target of output || []) {
+          assert.ok(
+            !/^PATCH organization/.test(target.node),
+            `${name} leads to ${target.node}`
+          );
+        }
+      }
+    }
   });
 });
 
@@ -713,21 +727,46 @@ describe("the human's field is never written", () => {
     }
   });
 
-  test('CONFIG declares it unwritable, and the one patch builder checks that list', () => {
+  test('CONFIG declares the unwritable fields, and both patch builders check that list', () => {
     const config = buildConfig();
-    assert.deepEqual(config.fields_never_write, [config.f_sales_rep_icp_score]);
-    const source = readFileSync(join(NODES_DIR, 'BuildOrgPatch.js'), 'utf8');
-    assert.ok(source.includes('fields_never_write'), 'BuildOrgPatch must check the never-write list');
-    assert.ok(source.includes('ICP_FORBIDDEN_WRITE'), 'and fail loudly, not silently omit');
+    // Two entries: the rep's own score, and the custom Website URL field the
+    // gate READS as a fallback identifier. Reading a field is not a licence to
+    // write it, and the second entry is what says so.
+    assert.deepEqual(config.fields_never_write, [config.f_sales_rep_icp_score, config.f_website_url]);
+    for (const file of ['BuildOrgPatch.js', 'BuildNoWebsiteWrite.js']) {
+      const source = readFileSync(join(NODES_DIR, file), 'utf8');
+      assert.ok(source.includes('fields_never_write'), `${file} must check the never-write list`);
+      assert.ok(source.includes('ICP_FORBIDDEN_WRITE'), `${file} must fail loudly, not silently omit`);
+    }
     const errorSource = readFileSync(join(NODES_DIR, 'BuildErrorContext.js'), 'utf8');
     assert.ok(!errorSource.includes('custom_fields'), 'BuildErrorContext must not build a patch at all');
+  });
+
+  test('the Website URL fallback is read and never written', () => {
+    const config = buildConfig();
+    assert.ok(!config.fields_written.includes(config.f_website_url), 'it must not be writable');
+    assert.ok(config.fields_never_write.includes(config.f_website_url), 'and must be named as unwritable');
+    const gate = readFileSync(join(NODES_DIR, 'IdempotencyGate.js'), 'utf8');
+    assert.match(gate, /custom\[cfg\.f_website_url\]/, 'the gate reads it');
+    assert.match(gate, /org\.website/, 'and reads the standard field first');
+    // Nothing else may touch it at all.
+    for (const file of readdirSync(NODES_DIR).filter((f) => f.endsWith('.js'))) {
+      if (file === 'IdempotencyGate.js') continue;
+      const source = readFileSync(join(NODES_DIR, file), 'utf8');
+      assert.ok(
+        !source.includes('f_website_url') || source.includes('fields_never_write'),
+        `${file} names the fallback field outside the never-write guard`
+      );
+    }
   });
 
   test('the five v5 fields are gone from the build entirely', () => {
     // Deleted from the Pipedrive account on 2026-09-17.
     const config = buildConfig();
     const fieldKeys = Object.keys(config).filter((k) => k.startsWith('f_')).sort();
-    assert.deepEqual(fieldKeys, ['f_auto_icp_score', 'f_auto_icp_scored_at', 'f_sales_rep_icp_score']);
+    assert.deepEqual(fieldKeys, [
+      'f_auto_icp_score', 'f_auto_icp_scored_at', 'f_sales_rep_icp_score', 'f_website_url',
+    ]);
     for (const legacy of ['f_icp_calculated', 'f_icp_score', 'f_icp_scored_at', 'f_icp_model_version', 'f_icp_final']) {
       assert.equal(config[legacy], undefined, `${legacy} must be gone from CONFIG`);
       assert.ok(!JSON.stringify(wf).includes(legacy), `${legacy} must be gone from the workflow`);
@@ -742,14 +781,14 @@ describe("the human's field is never written", () => {
   });
 });
 
-describe('one Path B run = one field write + one activity (the v6 contract)', () => {
+describe('one run = at most one field write + exactly one activity (the v6 contract)', () => {
   // The four statements the contract makes, as four tests. Each is a thing
   // someone could break by adding a node, and none of them is checkable by
   // reading a single file — they are properties of the whole graph.
 
-  const pathBNodes = () => {
+  const reachableFrom = (root) => {
     const seen = new Set();
-    const queue = ['Webhook Clay'];
+    const queue = [root];
     while (queue.length > 0) {
       const name = queue.shift();
       if (seen.has(name)) continue;
@@ -758,18 +797,46 @@ describe('one Path B run = one field write + one activity (the v6 contract)', ()
         for (const target of output || []) queue.push(target.node);
       }
     }
-    return [...seen].map((n) => byName.get(n)).filter(Boolean);
+    return seen;
   };
+  const pathANodes = () => reachableFrom('Webhook Pipedrive');
+  const pathBNodes = () => [...reachableFrom('Webhook Clay')].map((n) => byName.get(n)).filter(Boolean);
 
-  test('exactly one node writes to an organization, and it is a PATCH of custom_fields', () => {
+  test('two nodes write to an organization, one per path, both PATCHing custom_fields', () => {
+    // Path B writes a grade. Path A writes "n/a - no website" for an
+    // organization it could not send to the table at all. They are on
+    // different webhooks, so one RUN still reaches at most one of them.
     const writers = wf.nodes.filter((n) => {
       const p = n.parameters || {};
       return typeof p.url === 'string' && /organizations/.test(p.url) && p.method && p.method !== 'GET';
     });
-    assert.deepEqual(writers.map((n) => n.name), ['PATCH organization']);
-    assert.equal(writers[0].parameters.method, 'PATCH');
-    assert.match(writers[0].parameters.jsonBody, /\$json\.patch/,
-      'it writes the patch BuildOrgPatch built, and nothing it composes itself');
+    assert.deepEqual(
+      writers.map((n) => n.name).sort(),
+      ['PATCH organization', 'PATCH organization (no website)']
+    );
+    for (const node of writers) {
+      assert.equal(node.parameters.method, 'PATCH', node.name);
+      assert.match(node.parameters.jsonBody, /\$json\.patch/,
+        `${node.name} must write the patch a Code node built, never one it composes itself`);
+    }
+
+    const a = pathANodes();
+    const b = new Set(pathBNodes().map((n) => n.name));
+    assert.ok(a.has('PATCH organization (no website)') && !a.has('PATCH organization'));
+    assert.ok(b.has('PATCH organization') && !b.has('PATCH organization (no website)'));
+  });
+
+  test('both writers assert the same allow-list before they hand over a patch', () => {
+    // A second writer is exactly where a write contract quietly stops holding,
+    // so the invariants are asserted in BOTH builders rather than in the one
+    // that was written first.
+    for (const file of ['BuildOrgPatch.js', 'BuildNoWebsiteWrite.js']) {
+      const source = readFileSync(join(NODES_DIR, file), 'utf8');
+      assert.match(source, /ICP_UNEXPECTED_WRITE/, `${file} must refuse an unlisted key`);
+      assert.match(source, /ICP_PARTIAL_WRITE/, `${file} must refuse half the pair`);
+      assert.match(source, /ICP_FORBIDDEN_WRITE/, `${file} must refuse the human's field`);
+      assert.match(source, /cfg\.fields_written/, `${file} must allow-list, not deny-list`);
+    }
   });
 
   test('the only fields that patch can contain are the two CONFIG names', () => {
@@ -802,19 +869,46 @@ describe('one Path B run = one field write + one activity (the v6 contract)', ()
       const p = n.parameters || {};
       return typeof p.url === 'string' && /\/activities/.test(p.url);
     });
-    assert.deepEqual(activityNodes.map((n) => n.name).sort(), ['POST activity', 'POST activity error']);
+    assert.deepEqual(
+      activityNodes.map((n) => n.name).sort(),
+      ['POST activity', 'POST activity (no website)', 'POST activity error']
+    );
     for (const node of activityNodes) {
       assert.match(node.parameters.jsonBody, /done: true/, `${node.name} must not leave an open task`);
       assert.equal(node.retryOnFail, false, `${node.name} must not retry — a retry is a second activity`);
     }
 
-    // And the two are on different branches, so a run reaches exactly one.
+    // Three activity nodes, three mutually exclusive branches.
     const happy = pathBNodes().map((n) => n.name);
     assert.ok(happy.includes('POST activity'));
     assert.ok(happy.includes('POST activity error'));
+    assert.ok(!happy.includes('POST activity (no website)'));
+    assert.ok(pathANodes().has('POST activity (no website)'));
     assert.deepEqual(
       wf.connections['IF write allowed?'].main[0].map((t) => t.node), ['GET organization B'],
       'the happy branch leads to the write'
+    );
+
+    // The no-website branch converges: the PATCH runs or it does not, and
+    // either way exactly one activity is posted.
+    const skipIf = wf.connections['IF no-website write needed?'].main;
+    assert.deepEqual(skipIf[0].map((t) => t.node), ['PATCH organization (no website)']);
+    assert.deepEqual(skipIf[1].map((t) => t.node), ['POST activity (no website)']);
+    assert.deepEqual(
+      wf.connections['PATCH organization (no website)'].main[0].map((t) => t.node),
+      ['POST activity (no website)']
+    );
+  });
+
+  test('an organization with no website is never POSTed to Clay', () => {
+    // The whole point of the ruling: no domain, no request, no credit, and no
+    // grade derived from a company we guessed at.
+    const gate = wf.connections['IF has website?'].main;
+    assert.deepEqual(gate[0].map((t) => t.node), ['POST Clay'], 'true -> the table');
+    assert.deepEqual(gate[1].map((t) => t.node), ['BuildNoWebsiteWrite'], 'false -> the skip write');
+    assert.equal(
+      [...reachableFrom('BuildNoWebsiteWrite')].includes('POST Clay'), false,
+      'the skip branch must never rejoin the Clay request'
     );
   });
 
@@ -826,7 +920,11 @@ describe('one Path B run = one field write + one activity (the v6 contract)', ()
       if (method === 'GET') continue;
       // Everything that writes must be one of these four, by name.
       assert.ok(
-        ['PATCH organization', 'POST activity', 'POST activity error', 'POST Clay'].includes(node.name),
+        [
+          'PATCH organization', 'PATCH organization (no website)',
+          'POST activity', 'POST activity (no website)', 'POST activity error',
+          'POST Clay',
+        ].includes(node.name),
         `${node.name} writes ${method} ${p.url} — not in the v6 contract`
       );
     }

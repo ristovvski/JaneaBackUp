@@ -50,7 +50,7 @@ const levels = score.levels;
 
 const COLUMNS = [
   'ts', 'requested_at', 'request_id', 'execution_id', 'trigger', 'deal_id', 'org_id',
-  'identifier_kind', 'identifier_value', 'model_version',
+  'domain', 'model_version',
   'industry_vertical', 'industry_level', 'stage_level', 'type_level',
   'geo_level', 'revenue_level', 'revenue_source', 'buying_level',
   'eng_open', 'eng_open_60d_plus',
@@ -106,8 +106,7 @@ const row = {
   // column that is sometimes empty cannot be a number column.
   deal_id: parsed.deal_id === null || parsed.deal_id === undefined ? '' : String(parsed.deal_id),
   org_id: String(parsed.org_id),
-  identifier_kind: parsed.identifier_kind,
-  identifier_value: parsed.identifier_value,
+  domain: parsed.domain,
   model_version: parsed.model_version,
 
   industry_vertical: components.industry_vertical.value === null ? '' : components.industry_vertical.value,
