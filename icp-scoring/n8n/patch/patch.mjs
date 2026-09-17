@@ -368,12 +368,14 @@ export function buildWorkflow() {
     sendBody: true,
     specifyBody: 'json',
     jsonBody:
-      '={{ JSON.stringify({ ' +
+      '={{ JSON.stringify(Object.assign({ ' +
       "org_id: Number($('BuildNoWebsiteWrite').item.json.org_id), " +
       "subject: $('BuildNoWebsiteWrite').item.json.subject, " +
       "type: $('BuildNoWebsiteWrite').item.json.type, " +
       'done: true, ' +
-      "note: $('BuildNoWebsiteWrite').item.json.body }) }}",
+      "note: $('BuildNoWebsiteWrite').item.json.body " +
+      "}, $('BuildNoWebsiteWrite').item.json.deal_id " +
+      "? { deal_id: Number($('BuildNoWebsiteWrite').item.json.deal_id) } : {})) }}",
   }, NO_RETRY));
 
   // Non-blocking tee: anomaly gate on trigger volume.
@@ -471,7 +473,15 @@ export function buildWorkflow() {
     url: `=${PIPEDRIVE_V1}/activities`,
     sendBody: true,
     specifyBody: 'json',
-    jsonBody: '={{ JSON.stringify({ org_id: Number($json.org_id), subject: $json.subject, type: $json.type, done: true, note: $json.body }) }}',
+    // deal_id is sent whenever the run had one. Without it the activity is
+    // linked to the ORGANIZATION only, and Pipedrive shows a deal's activities
+    // on the deal — so a rep who opens the deal they just created sees nothing
+    // at all, which is exactly how it looked on deal 2278 / org 22589. Sending
+    // both links the SAME one activity to both records; it does not make two.
+    jsonBody: '={{ JSON.stringify(Object.assign({ '
+      + 'org_id: Number($json.org_id), subject: $json.subject, type: $json.type, '
+      + 'done: true, note: $json.body '
+      + '}, $json.deal_id ? { deal_id: Number($json.deal_id) } : {})) }}',
   }, NO_RETRY));
 
   nodes.push(codeNode('BuildRunSummary', [2140, 600], code('BuildRunSummary')));
@@ -516,7 +526,7 @@ export function buildWorkflow() {
     sendBody: true,
     specifyBody: 'json',
     jsonBody:
-      '={{ JSON.stringify({ ' +
+      '={{ JSON.stringify(Object.assign({ ' +
       `org_id: Number(${errRef}.org_id), ` +
       `subject: ${cfgRef('B')}.item.json.activity_subject_failed, ` +
       `type: ${cfgRef('B')}.item.json.activity_type, done: true, note: ` +
@@ -524,7 +534,7 @@ export function buildWorkflow() {
       `'Reason: ' + ${errRef}.error_message + '\\n\\n' + ` +
       `(${errRef}.problem_count > 0 ? 'What was wrong with the data: ' + ${errRef}.problems.join('; ') + '\\n\\n' : '') + ` +
       "'CHECK: this is a system fault, not a judgement about the company — the run trace has the detail.'" +
-      ' }) }}',
+      `}, ${errRef}.deal_id ? { deal_id: Number(${errRef}.deal_id) } : {})) }}`,
   }, NO_RETRY));
 
   // Wired LAST on the error branch so everything else has already run.
@@ -585,9 +595,19 @@ export function buildWorkflow() {
     'IF write allowed?': branch(['GET organization B'], ['BuildRunSummary']),
     'GET organization B': main('BuildOrgPatch'),
     BuildOrgPatch: main('IF patch non-empty?'),
-    // An empty patch means nothing changed, so no PATCH and no second note —
-    // but still an audit row.
-    'IF patch non-empty?': branch(['PATCH organization'], ['BuildRunSummary']),
+    // An empty patch means the grade and its date are already what this run
+    // would write, so there is no PATCH. The ACTIVITY still posts.
+    //
+    // It used to skip both, straight to the summary — which is why a re-score
+    // of jovia.org produced nothing a rep could see: the field already said
+    // "60 - B", so the branch short-circuited past BuildActivity entirely and
+    // the run left no trace on the record at all. "One PATCH, one activity" is
+    // the contract; the PATCH is conditional on something having changed, the
+    // activity is conditional on the run having happened.
+    //
+    // Both branches converge on BuildActivity, so exactly one runs and exactly
+    // one activity is posted — the same shape Path A's no-website branch has.
+    'IF patch non-empty?': branch(['PATCH organization'], ['BuildActivity']),
     'PATCH organization': main('BuildActivity'),
     BuildActivity: main('POST activity'),
     // BuildRunSummary is the end of the line. Its output IS the run's trace:

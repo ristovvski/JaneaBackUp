@@ -672,10 +672,42 @@ describe('the graph', () => {
     assert.deepEqual(duplicate.map((t) => t.node), ['BuildRunSummary']);
   });
 
-  test('an empty patch skips the PATCH and the note, but still audits', () => {
+  test('an empty patch skips the PATCH — and still posts the activity', () => {
+    // The PATCH is conditional on something having CHANGED. The activity is
+    // conditional on the run having HAPPENED. Skipping both is why a re-score
+    // of jovia.org (org 22589, already reading "60 - B") left no trace a rep
+    // could see: the branch went straight to the summary and the record showed
+    // nothing at all.
     const [nonEmpty, empty] = wf.connections['IF patch non-empty?'].main;
     assert.deepEqual(nonEmpty.map((t) => t.node), ['PATCH organization']);
-    assert.deepEqual(empty.map((t) => t.node), ['BuildRunSummary'], 'no second note, but an audit row');
+    assert.deepEqual(empty.map((t) => t.node), ['BuildActivity'],
+      'an unchanged score still leaves an activity');
+    // Both branches converge, so exactly one path runs and exactly one
+    // activity is posted — never two.
+    assert.deepEqual(
+      wf.connections['PATCH organization'].main[0].map((t) => t.node),
+      ['BuildActivity']
+    );
+  });
+
+  test('every non-duplicate Path B run reaches exactly one activity', () => {
+    // Walk from the write gate and count the POST activity nodes reachable
+    // along any single path. Two would be a double post; zero is jovia.
+    const walk = (node, seen = new Set()) => {
+      if (seen.has(node)) return [];
+      seen.add(node);
+      if (node === 'POST activity') return [[node]];
+      const outs = (wf.connections[node] || { main: [] }).main.flat().map((t) => t.node);
+      return outs.flatMap((next) => walk(next, new Set(seen)).map((p) => [node, ...p]));
+    };
+    const paths = walk('GET organization B');
+    assert.ok(paths.length >= 2, 'both the changed and unchanged branches must reach it');
+    for (const path of paths) {
+      assert.equal(
+        path.filter((n) => n === 'POST activity').length, 1,
+        `a run down ${path.join(' -> ')} must post exactly one activity`
+      );
+    }
   });
 
   test('the run summary is the last thing on Path B, and nothing follows it', () => {
@@ -883,6 +915,20 @@ describe('one run = at most one field write + exactly one activity (the v6 contr
     for (const node of activityNodes) {
       assert.match(node.parameters.jsonBody, /done: true/, `${node.name} must not leave an open task`);
       assert.equal(node.retryOnFail, false, `${node.name} must not retry — a retry is a second activity`);
+      // Linked to the DEAL as well as the organization when the run had one.
+      // Without it, Pipedrive shows nothing on the deal a rep just created —
+      // the activity exists, on the organization, where they are not looking.
+      // One activity, two records; it does not make two activities.
+      assert.match(node.parameters.jsonBody, /deal_id: Number\(/,
+        `${node.name} must link the activity to the deal when there is one`);
+      assert.match(node.parameters.jsonBody, /\? \{ deal_id[^}]*\} : \{\}/,
+        `${node.name} must OMIT deal_id rather than send null`);
+      // n8n ends an ={{ }} expression at the FIRST "}}". A nested object
+      // literal closing next to the terminator silently truncates the whole
+      // expression, which is how CONFIG lost 2749 characters once already.
+      const body = node.parameters.jsonBody;
+      assert.equal(body.indexOf('}}'), body.length - 2,
+        `${node.name}: an earlier "}}" would truncate the expression`);
     }
 
     // Three activity nodes, three mutually exclusive branches.

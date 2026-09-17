@@ -1831,3 +1831,85 @@ the `Dedupe B` and `Append audit row` failures from earlier — so the ICP alert
 was pointed at the same place rather than at a new channel nobody is watching.
 Say the word and it moves; it is one environment variable
 (`ICP_SLACK_CHANNEL`) at deploy time.
+
+---
+
+## 19. "jovia has nothing in activity" — 2026-09-17
+
+Request `req-e58ed52e-…`, org 22589, deal 2278. **Path B ran and succeeded**
+(execution 60663), wrote `Auto-ICP Score = "60 - B"`, and created activity
+**46846**. The activity existed the whole time. It was invisible for two
+reasons, and the second one is a real bug that would have hidden most of them.
+
+### Reason 1: it was on the organization, not the deal
+
+`POST activity` sent `org_id` and nothing else, so the activity had
+`deal_id: null`. Pipedrive shows a deal's activities on the deal — and deal
+2278 had **zero**:
+
+```
+v2 activities?deal_id=2278   ->  (none)
+v2 activities?org_id=22589   ->  46846 "ICP scored" (deal null, done true)
+```
+
+A rep opens the deal they just created and sees nothing. The record was on the
+organization, one click away, under Done.
+
+`deal_id` was in the event, survived `ParseScored`, and reached `BuildActivity`
+— the POST simply never sent it. All three activity nodes now send it when the
+run had one, and omit the key entirely when it is null rather than sending
+`null`. The same activity is linked to both records; it does not become two.
+
+### Reason 2: an unchanged score posted no activity at all
+
+The worse one. The graph read:
+
+```
+'IF patch non-empty?': branch(['PATCH organization'], ['BuildRunSummary'])
+```
+
+The false branch skipped the PATCH **and `BuildActivity` and `POST activity`**,
+straight to the summary. So any re-score that produced the same grade on the
+same day left **no trace whatsoever** — no field change, no activity, nothing a
+rep could see. Proved on jovia: a replay while the field already read `60 - B`
+ran `BuildOrgPatch -> IF patch non-empty? -> BuildRunSummary` and posted
+nothing.
+
+That contradicts the contract as written — *one PATCH, one activity*. The two
+are conditional on different things:
+
+- the **PATCH** is conditional on something having **changed**;
+- the **activity** is conditional on the run having **happened**.
+
+Both branches now converge on `BuildActivity`, which is the shape Path A's
+no-website branch already had — and a static test walks every path from the
+write gate and asserts each reaches `POST activity` exactly once, so neither
+zero nor two can come back.
+
+### Proved
+
+Execution **60687**, jovia replayed with the score unchanged:
+
+```
+… -> BuildOrgPatch -> IF patch non-empty? -> BuildActivity -> POST activity -> BuildRunSummary
+                                   (no PATCH: nothing changed)
+```
+
+```
+v2 activities?deal_id=2278  ->  46849 "ICP scored" (org 22589, deal 2278, done true)
+```
+
+Activity 46846 — the deal-less one from the old build — was deleted, so org
+22589 carries exactly one.
+
+### Also worth knowing: jovia.org is two organizations
+
+| org | name | Website URL | Auto-ICP Score |
+|---|---|---|---|
+| 22587 | Mykyta 2 | `jovia.org` | `null` |
+| 22589 | Jovia1 | `jovia.org` | `60 - B` |
+
+Deal 2274 scored 22587 earlier; deal 2278 scored 22589. Each is scored on its
+own, and a rep looking at the wrong one sees an empty field. Same shape as the
+six Sumersports records found in Phase 0 — the workflow scores the organization
+the deal points at, and cannot know the two are the same company.
