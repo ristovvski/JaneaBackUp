@@ -427,32 +427,7 @@ export function buildWorkflow() {
     jsonBody: '={{ JSON.stringify({ org_id: Number($json.org_id), subject: $json.subject, type: $json.type, done: true, note: $json.body }) }}',
   }, NO_RETRY));
 
-  nodes.push(codeNode('BuildAuditRow', [2140, 600], code('BuildAuditRow')));
-
-  // The audit store is an n8n Data Table, not a Google Sheet. It needs no
-  // credential, no OAuth consent and no external service to be reachable for a
-  // row to land, which is three fewer ways for the audit trail — the thing you
-  // reach for when a score is disputed — to be the part that failed.
-  //
-  // `dataTableId` is a resource locator in `name` mode: the Data Table node
-  // resolves a table by name, and a name survives the table being recreated in
-  // a way an id does not. autoMapInputData maps BuildAuditRow's keys onto the
-  // table's columns BY NAME, so the emitted key set must match the column set.
-  nodes.push({
-    parameters: {
-      resource: 'row',
-      operation: 'insert',
-      dataTableId: { __rl: true, value: `={{ ${cfgRef('B')}.item.json.audit_data_table }}`, mode: 'name' },
-      columns: { mappingMode: 'autoMapInputData', value: {}, matchingColumns: [], schema: [] },
-      options: {},
-    },
-    id: 'Append audit row',
-    name: 'Append audit row',
-    type: 'n8n-nodes-base.dataTable',
-    typeVersion: 1.1,
-    position: [2340, 600],
-    ...NO_RETRY,
-  });
+  nodes.push(codeNode('BuildRunSummary', [2140, 600], code('BuildRunSummary')));
 
   // ===== Error branch =====================================================
   //
@@ -541,16 +516,18 @@ export function buildWorkflow() {
     ParseScored: { main: [out('Score'), out('BuildErrorContext')] },
     Score: main('IF write allowed?'),
     // A duplicate skips the writes and goes straight to the audit row.
-    'IF write allowed?': branch(['GET organization B'], ['BuildAuditRow']),
+    'IF write allowed?': branch(['GET organization B'], ['BuildRunSummary']),
     'GET organization B': main('BuildOrgPatch'),
     BuildOrgPatch: main('IF patch non-empty?'),
     // An empty patch means nothing changed, so no PATCH and no second note —
     // but still an audit row.
-    'IF patch non-empty?': branch(['PATCH organization'], ['BuildAuditRow']),
+    'IF patch non-empty?': branch(['PATCH organization'], ['BuildRunSummary']),
     'PATCH organization': main('BuildActivity'),
     BuildActivity: main('POST activity'),
-    'POST activity': main('BuildAuditRow'),
-    BuildAuditRow: main('Append audit row'),
+    // BuildRunSummary is the end of the line. Its output IS the run's trace:
+    // it lands in the n8n execution, which is where a disputed score is read
+    // from now that there is no table.
+    'POST activity': main('BuildRunSummary'),
 
     // Error branch: alert a human first — if posting the activity also fails,
     // the ping must still have gone out — then leave the one activity. The

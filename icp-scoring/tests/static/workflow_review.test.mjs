@@ -609,7 +609,7 @@ describe('the graph', () => {
     // add the name here rather than retyping the block.
     const WITH_FALLBACK = [
       'Dedupe', 'Dedupe B', 'ParseScored', 'BuildOrgPatch',
-      'BuildActivity', 'BuildAuditRow', 'BuildErrorContext',
+      'BuildActivity', 'BuildRunSummary', 'BuildErrorContext',
     ];
     const extract = (src) => {
       const from = src.indexOf('let cfg = null;');
@@ -648,18 +648,24 @@ describe('the graph', () => {
   test('a duplicate Clay callback skips the writes but still reaches the audit row', () => {
     const [allowed, duplicate] = wf.connections['IF write allowed?'].main;
     assert.deepEqual(allowed.map((t) => t.node), ['GET organization B']);
-    assert.deepEqual(duplicate.map((t) => t.node), ['BuildAuditRow']);
+    assert.deepEqual(duplicate.map((t) => t.node), ['BuildRunSummary']);
   });
 
   test('an empty patch skips the PATCH and the note, but still audits', () => {
     const [nonEmpty, empty] = wf.connections['IF patch non-empty?'].main;
     assert.deepEqual(nonEmpty.map((t) => t.node), ['PATCH organization']);
-    assert.deepEqual(empty.map((t) => t.node), ['BuildAuditRow'], 'no second note, but an audit row');
+    assert.deepEqual(empty.map((t) => t.node), ['BuildRunSummary'], 'no second note, but an audit row');
   });
 
-  test('the audit row is the last thing on every Path B branch', () => {
-    assert.deepEqual(wf.connections.BuildAuditRow.main[0].map((t) => t.node), ['Append audit row']);
-    assert.equal(wf.connections['Append audit row'], undefined);
+  test('the run summary is the last thing on Path B, and nothing follows it', () => {
+    // It is the end of the line: its output IS the trace, and it lands in the
+    // n8n execution. Anything connected after it would be a sink that can go
+    // red for a reason unrelated to the score, which is exactly what dropping
+    // the Data Table removed.
+    assert.equal(wf.connections.BuildRunSummary, undefined, 'nothing may follow the summary');
+    const reaches = ['POST activity', 'IF write allowed?', 'IF patch non-empty?']
+      .map((n) => (wf.connections[n] || { main: [] }).main.flat().map((t) => t.node));
+    assert.ok(reaches.some((targets) => targets.includes('BuildRunSummary')));
   });
 
   test('an ignored deal goes to an explicit NoOp, not to an error', () => {
@@ -696,19 +702,20 @@ describe('the graph', () => {
   });
 });
 
-describe('ICP Final is never written', () => {
-  test('no write node references the ICP Final key', () => {
-    for (const node of wf.nodes.filter((n) => ['PATCH', 'POST', 'PUT'].includes((n.parameters || {}).method))) {
-      assert.ok(!/f_icp_final/.test(nodeParams(node)), `${node.name} references f_icp_final`);
+describe("the human's field is never written", () => {
+  test('no node references the Sales Rep key outside the never-write guard', () => {
+    for (const node of wf.nodes) {
+      if (/^CONFIG/.test(node.name)) continue;
+      const params = nodeParams(node);
+      if (!params.includes('f_sales_rep_icp_score')) continue;
+      assert.ok(params.includes('fields_never_write'),
+        `${node.name} names the human's field outside the never-write guard`);
     }
   });
 
-  test('CONFIG declares it unwritable, and the patch builders check that list', () => {
+  test('CONFIG declares it unwritable, and the one patch builder checks that list', () => {
     const config = buildConfig();
-    assert.deepEqual(config.fields_never_write, [config.f_sales_rep_icp_score, config.f_icp_final]);
-    // Only one node builds a patch now, and it is the one that must check.
-    // BuildErrorContext builds no patch at all, which is a stronger guarantee
-    // than checking a list.
+    assert.deepEqual(config.fields_never_write, [config.f_sales_rep_icp_score]);
     const source = readFileSync(join(NODES_DIR, 'BuildOrgPatch.js'), 'utf8');
     assert.ok(source.includes('fields_never_write'), 'BuildOrgPatch must check the never-write list');
     assert.ok(source.includes('ICP_FORBIDDEN_WRITE'), 'and fail loudly, not silently omit');
@@ -716,29 +723,22 @@ describe('ICP Final is never written', () => {
     assert.ok(!errorSource.includes('custom_fields'), 'BuildErrorContext must not build a patch at all');
   });
 
+  test('the five v5 fields are gone from the build entirely', () => {
+    // Deleted from the Pipedrive account on 2026-09-17.
+    const config = buildConfig();
+    const fieldKeys = Object.keys(config).filter((k) => k.startsWith('f_')).sort();
+    assert.deepEqual(fieldKeys, ['f_auto_icp_score', 'f_auto_icp_scored_at', 'f_sales_rep_icp_score']);
+    for (const legacy of ['f_icp_calculated', 'f_icp_score', 'f_icp_scored_at', 'f_icp_model_version', 'f_icp_final']) {
+      assert.equal(config[legacy], undefined, `${legacy} must be gone from CONFIG`);
+      assert.ok(!JSON.stringify(wf).includes(legacy), `${legacy} must be gone from the workflow`);
+    }
+  });
+
   test('the NOTE_WATCHDOG marker for NEEDS_DECISION #2 is where the runbook says', () => {
-    // §11 #2 default is the honor system, with a marker left at the exact
-    // place a change.organization watchdog would attach. RUNBOOK.md points a
-    // reader here, so the marker has to stay findable.
     const source = readFileSync(join(NODES_DIR, 'BuildOrgPatch.js'), 'utf8');
     assert.ok(source.includes('NOTE_WATCHDOG'), 'the marker must be in BuildOrgPatch.js');
     assert.match(source, /NEEDS_DECISION #2/);
     assert.match(source, /change\.organization/, 'and must name the webhook that would attach');
-  });
-
-  test('ICP Final is not read as scoring input anywhere', () => {
-    for (const node of wf.nodes) {
-      const params = nodeParams(node);
-      if (/^CONFIG/.test(node.name)) continue;
-      const reads = params.match(/f_icp_final/g) || [];
-      // BuildOrgPatch/BuildErrorContext touch it only via fields_never_write.
-      for (const _ of reads) {
-        assert.ok(
-          params.includes('fields_never_write'),
-          `${node.name} references f_icp_final outside the never-write guard`
-        );
-      }
-    }
   });
 });
 
@@ -772,14 +772,15 @@ describe('one Path B run = one field write + one activity (the v6 contract)', ()
       'it writes the patch BuildOrgPatch built, and nothing it composes itself');
   });
 
-  test('the only field that patch can contain is Auto-ICP Score', () => {
+  test('the only fields that patch can contain are the two CONFIG names', () => {
     // Asserted at the source, because the node builds the body and the HTTP
     // node just forwards it.
     const source = readFileSync(join(NODES_DIR, 'BuildOrgPatch.js'), 'utf8');
-    assert.match(source, /ICP_UNEXPECTED_WRITE/, 'the node must refuse a second key');
-    assert.match(source, /keys\.length > 1/, 'and refuse it by counting, not by naming');
+    assert.match(source, /ICP_UNEXPECTED_WRITE/, 'the node must refuse an unlisted key');
+    assert.match(source, /ICP_PARTIAL_WRITE/, 'and refuse to write one of the pair without the other');
+    assert.match(source, /cfg\.fields_written/, 'by allow-list, not by deny-list');
     const config = buildConfig();
-    assert.ok(config.f_auto_icp_score, 'CONFIG must carry the one writable key');
+    assert.deepEqual(config.fields_written, [config.f_auto_icp_score, config.f_auto_icp_scored_at]);
   });
 
   test('Sales Rep ICP Score is in the never-write list and referenced nowhere else', () => {
@@ -833,14 +834,9 @@ describe('one Path B run = one field write + one activity (the v6 contract)', ()
     assert.equal(JSON.stringify(wf).includes('label_ids'), false, 'nothing touches labels');
   });
 
-  test('no v5 ICP field appears in any node parameter', () => {
-    const config = buildConfig();
-    for (const node of wf.nodes) {
-      if (/^CONFIG/.test(node.name)) continue;
-      const params = nodeParams(node);
-      for (const retired of config.f_retired_v5) {
-        assert.ok(!params.includes(retired), `${node.name} still references a retired v5 field`);
-      }
-    }
+  test('no node reaches the icp_audit Data Table any more', () => {
+    assert.ok(!JSON.stringify(wf).includes('dataTable'), 'no Data Table node');
+    assert.ok(!JSON.stringify(wf).includes('icp_audit'), 'no reference to the table');
+    assert.equal(buildConfig().audit_data_table, undefined, 'and nothing in CONFIG names one');
   });
 });

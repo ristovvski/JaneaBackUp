@@ -1,87 +1,10 @@
 {
-  "_comment": "Written by scripts/pipedrive_create_fields.mjs. status=placeholder means the script has NOT been run against a real Pipedrive account yet: the `key` values below are deterministic stand-ins so that CONFIG, the fixtures and the static tests are all wired up and testable offline. A real run replaces every `key` with the 40-hex field key Pipedrive returns and every option `id` with the real option id, and sets status=live. Nothing else in the repo needs to change: CONFIG is regenerated from this file (npm run gen:config).",
+  "_comment": "Written by scripts/pipedrive_create_fields.mjs. Three fields, and only three: the workflow writes Auto-ICP Score and Auto-ICP Scored At together in one PATCH, and never touches Sales Rep ICP Score, which belongs to the human. The five v5 fields (ICP Calculated, ICP Score, ICP Scored At, ICP Model Version, ICP Final) were deleted from the account on 2026-09-17. status=placeholder means the script has NOT been run against a real account yet: the `key` values are deterministic stand-ins so CONFIG, the fixtures and the static tests are wired up and testable offline.",
   "status": "placeholder",
   "generated_at": null,
   "account": null,
   "model_version": "v6",
   "fields": {
-    "icp_calculated": {
-      "name": "ICP Calculated",
-      "field_type": "enum",
-      "purpose": "The system's answer. Written by WF-ICP-Score only.",
-      "key": "PLACEHOLDER_icp_calculated_0000000000000000000000",
-      "id": null,
-      "options": {
-        "ICP A": {
-          "id": null,
-          "label": "ICP A"
-        },
-        "ICP B": {
-          "id": null,
-          "label": "ICP B"
-        },
-        "ICP C": {
-          "id": null,
-          "label": "ICP C"
-        },
-        "Insufficient data": {
-          "id": null,
-          "label": "Insufficient data"
-        },
-        "Error": {
-          "id": null,
-          "label": "Error"
-        }
-      }
-    },
-    "icp_score": {
-      "name": "ICP Score",
-      "field_type": "double",
-      "purpose": "final_score, 0-100. Empty when status is insufficient_data or Error.",
-      "key": "PLACEHOLDER_icp_score_000000000000000000000000000",
-      "id": null
-    },
-    "icp_scored_at": {
-      "name": "ICP Scored At",
-      "field_type": "date",
-      "purpose": "When the score was written. Drives the 180-day re-score gate.",
-      "key": "PLACEHOLDER_icp_scored_at_00000000000000000000000",
-      "id": null
-    },
-    "icp_model_version": {
-      "name": "ICP Model Version",
-      "field_type": "varchar",
-      "purpose": "Rubric version the score came from. A different version forces a re-score.",
-      "key": "PLACEHOLDER_icp_model_version_0000000000000000000",
-      "id": null
-    },
-    "icp_final": {
-      "name": "ICP Final",
-      "field_type": "enum",
-      "purpose": "HUMAN-OWNED. Created so reps have somewhere to record an override. INVARIANT: never read as scoring input, never written by any workflow. See tests/static/nodes_execute.test.mjs 'never touches Final'.",
-      "never_write": true,
-      "never_read": true,
-      "key": "PLACEHOLDER_icp_final_000000000000000000000000000",
-      "id": null,
-      "options": {
-        "ICP A": {
-          "id": null,
-          "label": "ICP A"
-        },
-        "ICP B": {
-          "id": null,
-          "label": "ICP B"
-        },
-        "ICP C": {
-          "id": null,
-          "label": "ICP C"
-        },
-        "Not ICP": {
-          "id": null,
-          "label": "Not ICP"
-        }
-      }
-    },
     "auto_icp_score": {
       "name": "Auto-ICP Score",
       "field_type": "varchar",
@@ -95,14 +18,21 @@
       "purpose": "The human's field. Created by this repo so it exists next to the automatic one, and NEVER written to — asserted in BuildOrgPatch and in the static suite, not merely omitted.",
       "key": "PLACEHOLDER_sales_rep_icp_score_00000000000000000000000000000",
       "id": null
+    },
+    "auto_icp_scored_at": {
+      "name": "Auto-ICP Scored At",
+      "field_type": "date",
+      "purpose": "The date half of the idempotency pair, written in the same PATCH as Auto-ICP Score. It is what makes a re-score possible without a table: the gate reads it for age and for whether the org was scored under the current rubric.",
+      "key": "PLACEHOLDER_auto_icp_scored_at_000000000000000",
+      "id": null
     }
   },
-  "expected_field_count": 7,
+  "expected_field_count": 3,
   "written_by_workflow": [
-    "auto_icp_score"
+    "auto_icp_score",
+    "auto_icp_scored_at"
   ],
   "fields_never_write": [
-    "sales_rep_icp_score",
-    "icp_final"
+    "sales_rep_icp_score"
   ]
 }

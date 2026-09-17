@@ -1,29 +1,23 @@
 // IdempotencyGate — should this organization be scored at all?
 //
-// v6 changes what this can know. The workflow now writes ONE organization
-// field, Auto-ICP Score ("93 - A"), and that field carries no date and no
-// model version — the date and the version live in icp_audit, where the whole
-// trace lives. So the three-part freshness test v5 ran (real grade + current
-// model + younger than the window) has one part left that can be answered from
-// the organization record.
+// Skip when ALL THREE hold:
 //
-// The rule is therefore: **skip when Auto-ICP Score already holds a real
-// grade.** Clearing the field is what triggers a re-score.
+//   1. Auto-ICP Score holds a real grade — "93 - A", matched on shape. A run
+//      that came back "n/a - insufficient data" is NOT a score: it says the
+//      enrichment found too little, and freezing an account out for six months
+//      because of that would be the wrong lesson to draw from it.
+//   2. Auto-ICP Scored At is younger than CONFIG.rescore_after_days.
+//   3. Auto-ICP Scored At is on or after CONFIG.model_effective_date.
 //
-// What that costs, stated plainly rather than discovered later:
+// Rule 3 is how "was this scored under the current rubric?" is answered with a
+// date field instead of a version field. Nothing on the organization stores a
+// model version any more — the field that did was deleted — and the question
+// still has to be answerable, so bumping the rubric means bumping its
+// effective date, and every organization re-scores on its next trigger. The
+// cost, stated rather than discovered: an org scored the same day a rubric
+// ships is not re-scored by rule 3 alone, and waits for rule 2.
 //
-//   - The 180-day re-score window is GONE. Nothing on the organization records
-//     when it was scored, so nothing here can age it out.
-//   - A model bump no longer forces a re-score by itself.
-//
-// Both are recoverable, and in the same place: icp_audit holds `ts`,
-// `requested_at` and `model_version` per run, so a lookup on the table would
-// restore both tests exactly. That is a Path A addition against a table that
-// does not exist yet, so it is named here and not guessed at.
-//
-// The deviation that survives: a previous run that came back "insufficient
-// data" is NOT a grade, so it is re-scored rather than freezing the account
-// out. A transient failure must not cost an account its next look.
+// Any one failing means re-score, and a re-score overwrites BOTH fields.
 
 const cfg = $('CONFIG').item.json;
 const n = $('Normalize').item.json;
@@ -32,13 +26,12 @@ const org = fetched.data || fetched;
 const custom = org.custom_fields || {};
 
 const rawAutoScore = custom[cfg.f_auto_icp_score];
+const rawScoredAt = custom[cfg.f_auto_icp_scored_at];
 const autoScore = rawAutoScore === null || rawAutoScore === undefined
   ? null
   : String(rawAutoScore).trim();
 
-// "93 - A" is a grade. "n/a - insufficient data" and "n/a - error" are not:
-// they record that a run happened and produced nothing usable, and the whole
-// point of the deviation above is that such a run gets looked at again.
+// "93 - A" is a grade. "n/a - insufficient data" and "n/a - error" are not.
 const GRADE_PATTERN = /^\s*\d{1,3}\s*-\s*[ABC]\s*$/;
 const isRealGrade = autoScore !== null && autoScore !== '' && GRADE_PATTERN.test(autoScore);
 
@@ -46,15 +39,38 @@ const hasScore = cfg.rescore_on_error_or_insufficient
   ? isRealGrade
   : autoScore !== null && autoScore !== '';
 
-const skip = hasScore;
+// Pipedrive dates come back as YYYY-MM-DD; a full timestamp is accepted too.
+const scoredAtDay = rawScoredAt ? String(rawScoredAt).slice(0, 10) : null;
+let ageDays = null;
+if (scoredAtDay && /^\d{4}-\d{2}-\d{2}$/.test(scoredAtDay)) {
+  const then = Date.parse(`${scoredAtDay}T00:00:00Z`);
+  const now = Date.parse(`${String(cfg.now_iso).slice(0, 10)}T00:00:00Z`);
+  if (!Number.isNaN(then) && !Number.isNaN(now)) ageDays = Math.floor((now - then) / 86400000);
+}
+const isFresh = ageDays !== null && ageDays < cfg.rescore_after_days;
+
+// A string comparison is the right one here: both sides are YYYY-MM-DD, which
+// sorts lexicographically, and it cannot be thrown by a timezone.
+const currentModel = scoredAtDay !== null && cfg.model_effective_date
+  ? scoredAtDay >= String(cfg.model_effective_date).slice(0, 10)
+  : false;
+
+const skip = Boolean(hasScore && isFresh && currentModel);
 
 let reason;
 if (skip) {
-  reason = `already scored: "${autoScore}" — clear Auto-ICP Score to re-score`;
-} else if (autoScore === null || autoScore === '') {
-  reason = 'never scored';
+  reason = `fresh: "${autoScore}" scored ${ageDays}d ago (< ${cfg.rescore_after_days}d), ` +
+           `on or after the ${cfg.model_effective_date} model`;
+} else if (!hasScore) {
+  reason = autoScore === null || autoScore === ''
+    ? 'never scored'
+    : `previous result "${autoScore}" is not a grade — re-scoring`;
+} else if (ageDays === null) {
+  reason = 'no usable Auto-ICP Scored At date — re-scoring';
+} else if (!isFresh) {
+  reason = `stale: scored ${ageDays}d ago (>= ${cfg.rescore_after_days}d) — re-scoring`;
 } else {
-  reason = `previous result "${autoScore}" is not a grade — re-scoring`;
+  reason = `scored ${scoredAtDay}, before the ${cfg.model_effective_date} model took effect — re-scoring`;
 }
 
 return [{
@@ -73,7 +89,10 @@ return [{
 
     existing: {
       auto_icp_score: autoScore,
+      auto_icp_scored_at: scoredAtDay,
       is_real_grade: isRealGrade,
+      age_days: ageDays,
+      on_current_model: currentModel,
     },
   },
 }];

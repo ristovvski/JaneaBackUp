@@ -98,10 +98,9 @@ removed to save effort:
   delivery with 500 *"No authentication data defined on node!"* while the
   subscription upstream still looks healthy. `validate()` now rejects either
   half of that pair without the other.
-- **`gsheets_audit`** — the audit store is an n8n Data Table, which needs no
-  credential, no OAuth consent and no external service to be reachable. Three
-  fewer ways for the audit trail — the thing you reach for when a score is
-  disputed — to be the part that failed.
+- **`gsheets_audit`** — there is no audit store to authenticate to. The run's
+  trace is the n8n execution itself, so the thing you reach for when a score is
+  disputed cannot be the part that failed.
 
 ### 4. Environment variables on the n8n instance
 
@@ -114,9 +113,8 @@ ICP_CLAY_CALLBACK_URL   the Path B webhook URL (what Clay posts back to)
 ICP_SLACK_CHANNEL       the channel id, e.g. the id of #gtm-ops-dev
 ```
 
-`ICP_AUDIT_SHEET_ID` is gone: the audit store is an n8n Data Table addressed by
-name, and a table name is neither a secret nor environment-specific, so it is a
-plain constant in CONFIG (`audit_data_table`).
+`ICP_AUDIT_SHEET_ID` is gone, and so is its successor: there is no audit store
+at all. The run's trace lands in the n8n execution.
 
 CONFIG resolves each of the three **three ways, in order**, so the same export
 works on Cloud and self-hosted without being told which it is:
@@ -190,8 +188,6 @@ Then, in the n8n UI:
 
 Confirm on import:
 
-- [ ] the Data Table node's column mapping is `autoMapInputData` and the
-      `icp_audit` table's columns match `BuildAuditRow`'s 37, by name
 - [ ] every node shows a green credential, none shows "credential not found"
 - [ ] both webhook nodes show their authentication set
 - [ ] `settings.errorWorkflow` resolves to the real WF-ERR (the export carries
@@ -214,36 +210,16 @@ This complements rather than replaces SECURITY.md's own gate
 every `.env` value over 12 characters. Run that one too before any commit that
 touches this subtree — it is the authority, because it needs no guessing.
 
-### 6. Create the `icp_audit` Data Table
+### 6. Nothing to provision
 
-```bash
-npm run audit:table      # prints the 37 columns and their types, ready to type in
-```
+There is no audit store to create. The run's trace is the n8n execution itself:
+`BuildRunSummary` is the last node on Path B, and its output IS the summary. The
+icp_audit Data Table was dropped so that a Path B run has no node which can go
+red for a reason unrelated to the score.
 
-n8n → **Data tables** → **Create data table**, named exactly `icp_audit`, then
-add the columns the command prints, with the types it gives. Names must match
-exactly: the Data Table node maps input keys onto columns **by name**, so a
-mismatched name is dropped silently rather than failing the write.
-
-This one step is manual, and it is the only one. n8n's public API has no
-data-tables endpoint (`GET /api/v1/data-tables` → 404) and the internal REST API
-wants a browser session, so the only component on the instance that can reach
-data tables with an API key is a workflow node — and on this build that node has
-the `row` resource but not `table`:
-
-| probe, run in a throwaway webhook workflow | result |
-|---|---|
-| `resource=row, operation=get` | `Could not find the data table: 'icp_audit'` |
-| `resource=row, operation=insert` | reached the column mapper |
-| `resource=table, operation=list` | `Could not get parameter` |
-| `resource=table, operation=create` | `Could not get parameter` |
-
-The row half — the half Path B actually uses — works. When the instance picks up
-a build whose Data Table node carries the `table` resource, the same throwaway
-trick creates the table from `config/icp_audit_table.json` with no UI at all.
-
-Order matters: `autoMapInputData` matches by header name, and a column present
-in the node but missing from the sheet is silently dropped.
+Three organization fields, created by `scripts/pipedrive_create_fields.mjs`:
+Auto-ICP Score (text), Auto-ICP Scored At (date), Sales Rep ICP Score (text).
+The workflow writes the first two, together, and never the third.
 
 ### 7. Register the Pipedrive webhook
 
@@ -319,7 +295,7 @@ Every artefact carries `request_id`. One search finds the whole story.
 ```
 1. Slack alert            -> execution_id and request_id
 2. n8n execution list     -> filter by execution_id, open it, read the node outputs
-3. the icp_audit table    -> filter by request_id: one row per Path B run
+3. the n8n execution      -> BuildRunSummary's output: one flat summary per run
 4. the Pipedrive note     -> the footer carries "request_id <id>"
 5. the Clay row           -> request_id is column 1
 ```

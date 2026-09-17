@@ -1,27 +1,32 @@
 // BuildOrgPatch — the Pipedrive organization PATCH body, or {} when nothing
 // differs.
 //
-// v6 writes ONE field: Auto-ICP Score, text, "<final> - <grade>". That is the
-// whole contract. Everything a run produces — composite, levels, multiplier,
-// the activation guard, the trace — goes to icp_audit, where it can be queried
-// without adding a column a rep has to read past.
+// v6 writes TWO fields, in one PATCH: Auto-ICP Score, text, "<final> -
+// <grade>", and Auto-ICP Scored At, a date. That is the whole contract.
+// Everything else a run produces — composite, levels, multiplier, the
+// activation guard, the evidence — stays in the run's own trace rather than
+// becoming a column a rep has to read past.
+//
+// The date is not decoration: it is the entire idempotency mechanism. Without
+// it the gate can only ask "has this been scored?", and the answer is yes
+// forever. With it the gate asks "recently, and under this rubric?".
 //
 // What this node used to write and no longer does: ICP Calculated (enum),
-// ICP Score (number), ICP Scored At (date), ICP Model Version (text), and the
-// fill-if-empty of website and linkedin. The four fields still exist in the
-// account; whether they are deleted is Nik's call. They are kept in
-// CONFIG.f_retired_v5 so the static suite can assert no patch ever contains
-// one again.
+// ICP Score (number), ICP Scored At (date), ICP Model Version (text), ICP Final
+// (enum), and the fill-if-empty of website and linkedin. All five fields were
+// DELETED from the account on 2026-09-17, so there is no deny-list to keep in
+// step — the guarantee below is that the patch contains at most the two keys
+// CONFIG names, which does not rot.
 //
 // Three invariants, all ASSERTED rather than merely satisfied — a future edit
 // that breaks one fails loudly instead of quietly writing to a human's field:
 //
 //   1. Sales Rep ICP Score is NEVER written. It is the human's column, and the
 //      only reason this workflow knows its key is to check it is absent.
-//   2. ICP Final is NEVER written. Same reason, older field.
-//   3. The patch contains at most ONE key, and that key is Auto-ICP Score.
-//      Not "no forbidden keys" — exactly one permitted key, so a field added
-//      in future has to be added here deliberately.
+
+//   3. The patch contains at most the TWO keys CONFIG.fields_written names.
+//      Not "no forbidden keys" — an allow-list, so a field added in future has
+//      to be added there deliberately.
 //
 // No churn: the key is included only when the value actually differs from what
 // the org already holds, so a re-score that changes nothing sends no write at
@@ -85,19 +90,31 @@ if (score.status === 'insufficient_data') {
   autoScore = `${score.final_score}${cfg.auto_score_separator}${score.grade}`;
 }
 
+const scoredAt = String(cfg.now_iso).slice(0, 10); // Pipedrive date = YYYY-MM-DD
+
 // ---------------------------------------------------------------------------
-// Include it only if it differs.
+// The two move together, always.
+//
+// A score without its date is a score the gate can never age out, and a date
+// without its score is a date that means nothing — so "did anything change?"
+// is asked once, over the pair. A re-score on the same day with the same grade
+// writes nothing at all; a re-score on a later day writes both, because the
+// date IS the thing that changed and it is what the next gate reads.
 // ---------------------------------------------------------------------------
-const current = existing[cfg.f_auto_icp_score];
+const currentScore = existing[cfg.f_auto_icp_score];
+const currentDate = existing[cfg.f_auto_icp_scored_at];
 const same = (a, b) => {
   if (a === null || a === undefined || a === '') return b === null || b === undefined || b === '';
   if (b === null || b === undefined) return false;
-  return String(a).trim() === String(b).trim();
+  return String(a).trim().slice(0, 10) === String(b).trim().slice(0, 10);
 };
 
-const changed = !same(current, autoScore);
+const changed = !same(currentScore, autoScore) || !same(currentDate, scoredAt);
 const customFields = {};
-if (changed) customFields[cfg.f_auto_icp_score] = autoScore;
+if (changed) {
+  customFields[cfg.f_auto_icp_score] = autoScore;
+  customFields[cfg.f_auto_icp_scored_at] = scoredAt;
+}
 
 // ---------------------------------------------------------------------------
 // Invariants 1-3. Asserted, not assumed.
@@ -108,30 +125,30 @@ for (const forbidden of cfg.fields_never_write || []) {
   if (Object.prototype.hasOwnProperty.call(customFields, forbidden)) {
     const error = new Error(
       `ICP_FORBIDDEN_WRITE: the patch contains ${forbidden}, which is in ` +
-      `CONFIG.fields_never_write (Sales Rep ICP Score and ICP Final belong to the human)`
+      `CONFIG.fields_never_write (Sales Rep ICP Score belongs to the human)`
     );
     error.name = 'IcpForbiddenWrite';
     throw error;
   }
 }
 
-for (const retired of cfg.f_retired_v5 || []) {
-  if (Object.prototype.hasOwnProperty.call(customFields, retired)) {
+const permitted = cfg.fields_written || [];
+for (const key of keys) {
+  if (permitted.indexOf(key) === -1) {
     const error = new Error(
-      `ICP_RETIRED_FIELD_WRITE: the patch contains ${retired}, a v5 field this ` +
-      `workflow no longer writes. Everything but Auto-ICP Score goes to icp_audit.`
+      `ICP_UNEXPECTED_WRITE: a Path B run writes only the fields in ` +
+      `CONFIG.fields_written. This patch also carries ${key}.`
     );
-    error.name = 'IcpRetiredFieldWrite';
+    error.name = 'IcpUnexpectedWrite';
     throw error;
   }
 }
-
-if (keys.length > 1 || (keys.length === 1 && keys[0] !== cfg.f_auto_icp_score)) {
+if (keys.length !== 0 && keys.length !== permitted.length) {
   const error = new Error(
-    `ICP_UNEXPECTED_WRITE: a Path B run writes at most one organization field ` +
-    `(Auto-ICP Score). This patch carries ${JSON.stringify(keys)}.`
+    `ICP_PARTIAL_WRITE: the score and its date move together. This patch ` +
+    `carries ${JSON.stringify(keys)} instead of all ${permitted.length} or none.`
   );
-  error.name = 'IcpUnexpectedWrite';
+  error.name = 'IcpPartialWrite';
   throw error;
 }
 
@@ -149,8 +166,10 @@ return [{
     patch,
     patch_is_empty: !changed,
     auto_icp_score: autoScore,
-    previous_auto_icp_score: current === undefined ? null : current,
-    changed_fields: changed ? [cfg.f_auto_icp_score] : [],
-    unchanged_fields: changed ? [] : [cfg.f_auto_icp_score],
+    auto_icp_scored_at: scoredAt,
+    previous_auto_icp_score: currentScore === undefined ? null : currentScore,
+    previous_auto_icp_scored_at: currentDate === undefined ? null : currentDate,
+    changed_fields: changed ? permitted : [],
+    unchanged_fields: changed ? [] : permitted,
   },
 }];

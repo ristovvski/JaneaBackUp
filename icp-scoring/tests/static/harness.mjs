@@ -38,15 +38,16 @@ export function makeConfig(overrides = {}) {
     // Deterministic stand-ins for the option ids a live create_fields run
     // supplies. They are numbers because Pipedrive option ids are numbers,
     // which is what BuildOrgPatch writes.
-    opt_icp_calculated: {
-      'ICP A': 101, 'ICP B': 102, 'ICP C': 103,
-      'Insufficient data': 104, 'Error': 105,
-    },
     clay_engine_url: 'https://hooks.clay.test/icp-engine',
     clay_callback_url: 'https://n8n.test/webhook/icp-scored-clay-dev',
-    audit_data_table: 'icp_audit',
     slack_channel_ops: 'CDEVOPS001',
     now_iso: NOW_ISO,
+    // The suite pins "now" to 2026-09-09, well before the real rubric's
+    // effective date, so every fixture would fail the gate's third rule for a
+    // reason that has nothing to do with what is being tested. Pinned here to a
+    // date comfortably before NOW_ISO; the tests that are ABOUT the epoch
+    // supply their own.
+    model_effective_date: '2026-01-01',
     ...overrides,
   };
 }

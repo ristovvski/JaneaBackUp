@@ -97,26 +97,25 @@ export function buildConfig() {
     ),
 
     // --- Pipedrive field keys --------------------------------------------
-    // v6 writes ONE organization field. Everything else a run produces —
-    // composite, levels, multiplier, the activation guard, the whole trace —
-    // goes to icp_audit, where it can be queried without adding a column to a
-    // CRM record that a rep has to read past.
+    // v6 writes TWO organization fields, together. Everything else a run
+    // produces — composite, levels, multiplier, the activation guard, the
+    // evidence — stays in the run's own trace rather than becoming a column a
+    // rep has to read past.
+    // The two this workflow writes, together, in one PATCH.
     f_auto_icp_score: field('auto_icp_score'),
+    f_auto_icp_scored_at: field('auto_icp_scored_at'),
 
     // Never written. Present so BuildOrgPatch can ASSERT it is absent from
     // every patch rather than merely omitting it, and so the static suite can
     // name the key without a literal.
     f_sales_rep_icp_score: field('sales_rep_icp_score'),
-    f_icp_final: field('icp_final'),
-    fields_never_write: [field('sales_rep_icp_score'), field('icp_final')],
+    fields_never_write: [field('sales_rep_icp_score')],
 
-    // The four v5 fields, retained ONLY so the static suite can assert no
-    // patch ever contains them. They still exist in the account; whether they
-    // are deleted is Nik's call.
-    f_retired_v5: [
-      field('icp_calculated'), field('icp_score'),
-      field('icp_scored_at'), field('icp_model_version'),
-    ],
+    // The five v5 fields were DELETED from the account on 2026-09-17, so there
+    // is no deny-list to maintain: the guarantee is now "the patch contains at
+    // most these two keys", which is stronger than naming what it must not
+    // contain and does not rot when a field is added elsewhere.
+    fields_written: [field('auto_icp_score'), field('auto_icp_scored_at')],
 
     // --- the one written value -------------------------------------------
     // "56 - B". One string, one meaning, and a rep can read it without a
@@ -137,6 +136,12 @@ export function buildConfig() {
 
     // --- policy ----------------------------------------------------------
     rescore_after_days: RUBRIC.rescore_after_days,
+    // The date this rubric took effect. The gate has no per-org model version
+    // to compare — nothing on the organization stores one — so "was this org
+    // scored under the current model?" is answered as "was it scored on or
+    // after the day the current model went live?". Bumping the rubric means
+    // bumping this date, and every org re-scores on its next trigger.
+    model_effective_date: RUBRIC.model_effective_date,
     // Deviation on record: §8.1 says skip when ICP Calculated is present at
     // all. Skipping for 180 days because a previous run hit a transient error
     // would be a bug, not idempotency, so only a real grade counts as a fresh
@@ -150,11 +155,6 @@ export function buildConfig() {
     note_max_chars: 1500,
 
     // --- expected shapes -------------------------------------------------
-    // The n8n Data Table the audit row is appended to. A name, not an id: the
-    // Data Table node resolves either, and a name survives a table being
-    // recreated in a way an id does not.
-    audit_data_table: 'icp_audit',
-
     trigger_entity: 'deal',
     trigger_action: 'create',
     clay_event_name: 'icp.scored',

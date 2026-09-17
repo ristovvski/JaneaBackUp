@@ -1,18 +1,19 @@
-// BuildAuditRow — one row per Path B run, in the exact column order of §8.4.
+// BuildRunSummary — one flat object per Path B run: what was decided, from
+// what, and what it changed.
 //
-// Written for EVERY run, including a dropped duplicate (flagged in `error`).
-// A dedupe that leaves no trace is indistinguishable from a lost event when
+// This is the END of the line. Its output is the run's trace, and it lands in
+// the n8n execution, which is where a disputed score is read from. There is no
+// table: the Data Table sink was dropped so that a Path B run has no node that
+// can go red for a reason unrelated to the score.
+//
+// Written for EVERY run, including a dropped duplicate (flagged in `error`). A
+// dedupe that leaves no trace is indistinguishable from a lost event when
 // someone asks why an organization was not scored.
 //
-// The icp_audit Data Table's columns must match COLUMNS below by NAME: the
-// Data Table node maps input keys onto columns by name, so a column added here
-// and not to the table is silently dropped rather than shifting the row.
-// RUNBOOK.md carries the column list and its types.
-//
-// tests/static/nodes_execute.test.mjs asserts the emitted row has exactly these
-// keys in exactly this order. Order does not affect the write — it keeps the
-// row readable in a trace, and it makes an added column a failing test rather
-// than a quiet change of shape.
+// The key ORDER is fixed and asserted by tests/static/nodes_execute.test.mjs.
+// It buys nothing mechanically now that nothing consumes the row positionally;
+// what it buys is a trace that reads the same way every time, and an added key
+// that shows up as a failing test rather than as a quiet change of shape.
 
 // CONFIG on Path A, CONFIG B on Path B. The two Set nodes hold the same JSON,
 // but a Code node may only reference a node that is CONNECTED upstream of it:
@@ -56,7 +57,7 @@ const COLUMNS = [
   'activation_state', 'contracting_guard_applied', 'multiplier', 'composite', 'final',
   'final_without_activation', 'grade', 'status', 'confidence_overall',
   'tier2_candidate', 'flags', 'missing_inputs', 'evidence_json',
-  'patch_written', 'auto_icp_score', 'activity_id', 'error',
+  'patch_written', 'auto_icp_score', 'auto_icp_scored_at', 'activity_id', 'error',
 ];
 
 // Collapse every component's gaps into one auditable string.
@@ -87,11 +88,11 @@ if (parsed._rate_exceeded) errorBits.push(`rate_exceeded:${parsed._rate_this_hou
 // contradicting it.
 if (parsed.conflict_note) errorBits.push(`conflict:${parsed.conflict_note}`);
 
-// A Data Table number column cannot hold "unknown", and 0 would be a lie: the
-// jobs provider returning nothing and a company having nothing open are
-// opposite facts. -1 is the sentinel, documented in config/icp_audit_table.json
-// and nowhere else, so a query for "companies with no open roles" writes
-// `eng_open = 0` and gets the right answer.
+// -1 means "the jobs provider returned nothing"; 0 means "it returned nothing
+// open". They are opposite facts and a summary that prints 0 for both is lying
+// about one — which is exactly how stage_maturity went wrong on Akuvo. The
+// sentinel survives the Data Table being dropped because the distinction was
+// never about the table: it is about the two facts.
 const count = (v) => (v === null || v === undefined ? -1 : v);
 const hiring = parsed.hiring || {};
 
@@ -141,17 +142,17 @@ const row = {
     ? String(activityResponse.id || activityResponse.data.id)
     : '',
   auto_icp_score: patch === null ? '' : String(patch.auto_icp_score || ''),
+  auto_icp_scored_at: patch === null ? '' : String(patch.auto_icp_scored_at || ''),
   error: errorBits.join(' · '),
 };
 
-// Emit in COLUMNS order. The Data Table maps by name, so this is for the
-// human reading the execution, not for the write.
+// Emit in COLUMNS order, for the human reading the execution.
 const ordered = {};
 for (const column of COLUMNS) ordered[column] = row[column];
 
 const missingColumns = COLUMNS.filter((c) => !Object.prototype.hasOwnProperty.call(row, c));
 if (missingColumns.length > 0) {
-  throw new Error(`ICP_AUDIT_COLUMN_MISSING: ${missingColumns.join(', ')}`);
+  throw new Error(`ICP_SUMMARY_KEY_MISSING: ${missingColumns.join(', ')}`);
 }
 
 return [{ json: ordered, pairedItem: { item: 0 } }];

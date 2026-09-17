@@ -35,7 +35,7 @@ const SRC = {
   Score: readNode('Score'),
   BuildOrgPatch: readNode('BuildOrgPatch'),
   BuildActivity: readNode('BuildActivity'),
-  BuildAuditRow: readNode('BuildAuditRow'),
+  BuildRunSummary: readNode('BuildRunSummary'),
   BuildErrorContext: readNode('BuildErrorContext'),
 };
 
@@ -98,7 +98,7 @@ const buildActivity = (out) => runCodeNode(SRC.BuildActivity, {
   nodes: { CONFIG: cfg, Score: out },
 });
 
-const auditRow = (out, extra = {}) => runCodeNode(SRC.BuildAuditRow, {
+const runSummary = (out, extra = {}) => runCodeNode(SRC.BuildRunSummary, {
   nodes: { CONFIG: cfg, Score: out, ...extra },
 });
 
@@ -281,95 +281,127 @@ describe('Normalize', () => {
 // ==========================================================================
 describe('IdempotencyGate', () => {
   const normalized = () => normalize(dedupeA(pipedriveFixture('deal_added.v2.json'), {})[0])[0].json;
-  const gateWith = (autoScore, fixture = 'org_full.json') => {
-    const { org } = orgFixture(fixture, cfg);
-    if (autoScore === null) delete org.custom_fields[cfg.f_auto_icp_score];
-    else org.custom_fields[cfg.f_auto_icp_score] = autoScore;
-    return gate(normalized(), org)[0].json;
+  const TODAY = String(NOW_ISO).slice(0, 10);
+  const daysAgo = (n) => new Date(Date.parse(`${TODAY}T00:00:00Z`) - n * 86400000).toISOString().slice(0, 10);
+
+  const gateWith = (autoScore, scoredAt, config = cfg) => {
+    const { org } = orgFixture('org_full.json', config);
+    if (autoScore === null) delete org.custom_fields[config.f_auto_icp_score];
+    else org.custom_fields[config.f_auto_icp_score] = autoScore;
+    if (scoredAt === null) delete org.custom_fields[config.f_auto_icp_scored_at];
+    else org.custom_fields[config.f_auto_icp_scored_at] = scoredAt;
+    return runCodeNode(SRC.IdempotencyGate, {
+      input: [org], nodes: { CONFIG: config, Normalize: normalized() },
+    })[0].json;
   };
 
-  test('a real grade already on the record -> skip', () => {
-    const out = gateWith('93 - A');
+  test('all three conditions met -> skip', () => {
+    const out = gateWith('93 - A', daysAgo(10));
     assert.equal(out.skip, true);
-    assert.match(out.reason, /already scored: "93 - A"/);
-    assert.equal(out.existing.is_real_grade, true);
+    assert.match(out.reason, /fresh: "93 - A" scored 10d ago/);
+    assert.equal(out.existing.age_days, 10);
+    assert.equal(out.existing.on_current_model, true);
   });
 
-  test('never scored -> do not skip', () => {
-    const out = gateWith(null);
+  test('never scored -> re-score', () => {
+    const out = gateWith(null, null);
     assert.equal(out.skip, false);
     assert.equal(out.reason, 'never scored');
   });
 
-  test('an empty string is never-scored, not scored-with-nothing', () => {
-    assert.equal(gateWith('').skip, false);
+  test('a grade with no date -> re-score, because nothing can age it out', () => {
+    const out = gateWith('93 - A', null);
+    assert.equal(out.skip, false);
+    assert.match(out.reason, /no usable Auto-ICP Scored At date/);
   });
 
-  test('"n/a - insufficient data" is retried, not treated as a score', () => {
-    // A run that found too little must not freeze the account out. This is the
-    // deviation on record, and it is the whole reason the gate looks at the
-    // SHAPE of the value rather than at its presence.
-    const out = gateWith('n/a - insufficient data');
+  test('past the window -> re-score', () => {
+    const out = gateWith('93 - A', daysAgo(200));
+    assert.equal(out.skip, false);
+    assert.match(out.reason, /stale: scored 200d ago \(>= 180d\)/);
+  });
+
+  test('exactly at the boundary is stale, not fresh', () => {
+    assert.equal(gateWith('93 - A', daysAgo(cfg.rescore_after_days)).skip, false);
+    assert.equal(gateWith('93 - A', daysAgo(cfg.rescore_after_days - 1)).skip, true);
+  });
+
+  test('scored before the current model took effect -> re-score', () => {
+    // This is how "has the rubric changed?" is answered with a date field:
+    // nothing on the organization stores a model version any more.
+    const config = { ...cfg, model_effective_date: daysAgo(30) };
+    assert.equal(gateWith('93 - A', daysAgo(60), config).skip, false, 'scored under the old rubric');
+    const out = gateWith('93 - A', daysAgo(60), config);
+    assert.match(out.reason, /before the .* model took effect/);
+    assert.equal(gateWith('93 - A', daysAgo(10), config).skip, true, 'scored under the current one');
+  });
+
+  test('the day a rubric ships counts as on it, not before it', () => {
+    const config = { ...cfg, model_effective_date: daysAgo(30) };
+    assert.equal(gateWith('93 - A', daysAgo(30), config).skip, true);
+    assert.equal(gateWith('93 - A', daysAgo(31), config).skip, false);
+  });
+
+  test('"n/a - insufficient data" always retries, however fresh', () => {
+    // A run that found too little must not freeze the account out for six
+    // months. This is the deviation on record, and it is why the gate looks at
+    // the SHAPE of the value rather than at its presence.
+    const out = gateWith('n/a - insufficient data', daysAgo(1));
     assert.equal(out.skip, false);
     assert.match(out.reason, /is not a grade — re-scoring/);
   });
 
-  test('"n/a - error" is retried too', () => {
-    assert.equal(gateWith('n/a - error').skip, false);
-  });
-
-  test('the literal reading is one CONFIG flag away', () => {
-    const strict = makeConfig({ nodes: { CONFIG: { rescore_on_error_or_insufficient: false } } });
-    strict.rescore_on_error_or_insufficient = false;
-    const { org } = orgFixture('org_full.json', strict);
-    org.custom_fields[strict.f_auto_icp_score] = 'n/a - insufficient data';
-    const [out] = runCodeNode(SRC.IdempotencyGate, {
-      input: [org],
-      nodes: { CONFIG: strict, Normalize: normalized() },
-    });
-    assert.equal(out.json.skip, true, 'with the flag off, any value counts as scored');
+  test('"n/a - error" always retries too', () => {
+    assert.equal(gateWith('n/a - error', daysAgo(1)).skip, false);
   });
 
   test('a garbled value is not mistaken for a grade', () => {
     for (const value of ['A', '93', '93 -', 'ICP A', '93 - D', '993 - A - B']) {
-      assert.equal(gateWith(value).skip, false, value);
+      assert.equal(gateWith(value, daysAgo(1)).skip, false, value);
     }
   });
 
   test('the shape it accepts is tolerant of spacing, and nothing else', () => {
     for (const value of ['93 - A', '93-A', ' 7 -  B ', '0 - C']) {
-      assert.equal(gateWith(value).skip, true, value);
+      assert.equal(gateWith(value, daysAgo(1)).skip, true, value);
     }
+  });
+
+  test('a garbled date re-scores rather than skipping', () => {
+    for (const value of ['not a date', '17/09/2026', '']) {
+      assert.equal(gateWith('93 - A', value).skip, false, value);
+    }
+  });
+
+  test('the literal reading is one CONFIG flag away', () => {
+    const strict = { ...cfg, rescore_on_error_or_insufficient: false };
+    assert.equal(gateWith('n/a - insufficient data', daysAgo(1), strict).skip, true);
   });
 
   test('it carries the identifiers Path A needs, whatever it decides', () => {
     for (const value of [null, '93 - A']) {
-      const out = gateWith(value);
-      assert.ok(out.org_id && String(out.org_id).length > 0, 'the org id survives either decision');
+      const out = gateWith(value, daysAgo(1));
+      assert.ok(out.org_id && String(out.org_id).length > 0);
       assert.ok(out.request_id);
-      assert.ok(Object.prototype.hasOwnProperty.call(out, 'org_name'));
-      assert.ok(Object.prototype.hasOwnProperty.call(out, 'org_website'));
-      assert.ok(Object.prototype.hasOwnProperty.call(out, 'org_linkedin'));
+      for (const key of ['org_name', 'org_website', 'org_linkedin']) {
+        assert.ok(Object.prototype.hasOwnProperty.call(out, key), key);
+      }
     }
   });
 
-  test('it no longer reads any v5 field', () => {
-    // The four are still on the account and still in CONFIG, but only so the
-    // static suite can assert they are never written. Reading one here would
-    // resurrect a dependency on a field nothing maintains.
+  test('it reads only the two fields that still exist', () => {
     const source = readNode('IdempotencyGate');
-    for (const key of ['f_icp_calculated', 'f_icp_score', 'f_icp_scored_at', 'f_icp_model_version']) {
+    for (const key of ['f_icp_calculated', 'f_icp_score', 'f_icp_scored_at', 'f_icp_model_version', 'f_icp_final']) {
       assert.ok(!source.includes(key), `IdempotencyGate still reads ${key}`);
     }
+    assert.ok(source.includes('f_auto_icp_score'));
+    assert.ok(source.includes('f_auto_icp_scored_at'));
   });
 
-  test('the lost freshness window is documented where it was lost', () => {
-    // The 180-day re-score and the model-bump re-score both died with the
-    // fields that carried their inputs. A silent behaviour loss is the thing
-    // this test exists to prevent.
+  test('what rule 3 costs is written down where it is paid', () => {
     const source = readNode('IdempotencyGate');
-    assert.match(source, /180-day re-score window is GONE/);
-    assert.match(source, /icp_audit holds/);
+    assert.match(source, /model_effective_date/);
+    assert.match(source, /an org scored the same day a rubric\s*\n\/\/ ships is not re-scored by rule 3 alone/);
   });
 });
 
@@ -688,11 +720,25 @@ describe('BuildOrgPatch — one field, and nothing else', () => {
     return { out: orgPatch(out0, org)[0].json, parsed: out0, org };
   };
 
-  test('a scored run writes exactly ONE custom field, and it is Auto-ICP Score', () => {
+  test('a scored run writes exactly TWO custom fields: the score and its date', () => {
     const { out } = patchFor('icp_scored_A.json');
     assert.deepEqual(Object.keys(out.patch), ['custom_fields']);
-    assert.deepEqual(Object.keys(out.patch.custom_fields), [cfg.f_auto_icp_score]);
+    assert.deepEqual(Object.keys(out.patch.custom_fields).sort(),
+      [cfg.f_auto_icp_score, cfg.f_auto_icp_scored_at].sort());
     assert.equal(out.patch.custom_fields[cfg.f_auto_icp_score], '93 - A');
+    assert.equal(out.patch.custom_fields[cfg.f_auto_icp_scored_at], String(NOW_ISO).slice(0, 10));
+  });
+
+  test('the two move together — never one without the other', () => {
+    // A score the gate can never age out, or a date that means nothing: both
+    // are worse than no write, so the node refuses a partial one by name.
+    const source = readNode('BuildOrgPatch');
+    assert.match(source, /ICP_PARTIAL_WRITE/);
+    for (const name of VALID_FIXTURES) {
+      const { out } = patchFor(name);
+      const keys = Object.keys(out.patch.custom_fields || {});
+      assert.ok(keys.length === 0 || keys.length === 2, `${name} wrote ${keys.length} field(s)`);
+    }
   });
 
   test('the format is "<final> - <grade>"', () => {
@@ -719,14 +765,17 @@ describe('BuildOrgPatch — one field, and nothing else', () => {
     assert.ok(source.includes('ICP_FORBIDDEN_WRITE'), 'asserted, not merely omitted');
   });
 
-  test('no v5 field is ever written again', () => {
+  test('only the two keys CONFIG names can ever appear', () => {
+    // An allow-list, not a deny-list: the five v5 fields are deleted from the
+    // account, and a deny-list would have to be maintained forever against
+    // fields that no longer exist.
     for (const name of VALID_FIXTURES) {
       const { out } = patchFor(name);
-      const keys = Object.keys(out.patch.custom_fields || {});
-      for (const retired of cfg.f_retired_v5) {
-        assert.ok(!keys.includes(retired), `${name} wrote retired field ${retired}`);
+      for (const key of Object.keys(out.patch.custom_fields || {})) {
+        assert.ok(cfg.fields_written.includes(key), `${name} wrote unlisted key ${key}`);
       }
     }
+    assert.deepEqual(cfg.fields_written, [cfg.f_auto_icp_score, cfg.f_auto_icp_scored_at]);
   });
 
   test('the patch carries NOTHING at the top level — no website, no label, no owner', () => {
@@ -744,13 +793,26 @@ describe('BuildOrgPatch — one field, and nothing else', () => {
     assert.equal(out.patch.linkedin, undefined);
   });
 
-  test('no churn — the same value twice produces {} and the gate skips the PATCH', () => {
+  test('no churn — the same score AND the same date produce {}', () => {
     const { out } = patchFor('icp_scored_A.json', 'org_full.json', (org) => {
       org.custom_fields[cfg.f_auto_icp_score] = '93 - A';
+      org.custom_fields[cfg.f_auto_icp_scored_at] = String(NOW_ISO).slice(0, 10);
     });
     assert.deepEqual(out.patch, {});
     assert.equal(out.patch_is_empty, true);
     assert.deepEqual(out.changed_fields, []);
+  });
+
+  test('the same grade on a LATER day still writes — the date is what changed', () => {
+    // And it has to: the date is what the next gate ages out. A re-score that
+    // refreshed the grade and not the clock would make the window meaningless.
+    const { out } = patchFor('icp_scored_A.json', 'org_full.json', (org) => {
+      org.custom_fields[cfg.f_auto_icp_score] = '93 - A';
+      org.custom_fields[cfg.f_auto_icp_scored_at] = '2026-01-01';
+    });
+    assert.equal(out.patch_is_empty, false);
+    assert.equal(out.patch.custom_fields[cfg.f_auto_icp_scored_at], String(NOW_ISO).slice(0, 10));
+    assert.equal(out.previous_auto_icp_scored_at, '2026-01-01');
   });
 
   test('a different value produces the write, and reports what it replaced', () => {
@@ -872,7 +934,7 @@ describe('BuildActivity — one activity, in plain words', () => {
 });
 
 // ==========================================================================
-describe('BuildAuditRow', () => {
+describe('BuildRunSummary', () => {
   const EXPECTED_COLUMNS = [
     'ts', 'requested_at', 'request_id', 'execution_id', 'trigger', 'deal_id', 'org_id',
     'identifier_kind', 'identifier_value', 'model_version',
@@ -882,47 +944,28 @@ describe('BuildAuditRow', () => {
     'activation_state', 'contracting_guard_applied', 'multiplier', 'composite', 'final',
     'final_without_activation', 'grade', 'status', 'confidence_overall',
     'tier2_candidate', 'flags', 'missing_inputs', 'evidence_json',
-    'patch_written', 'auto_icp_score', 'activity_id', 'error',
+    'patch_written', 'auto_icp_score', 'auto_icp_scored_at', 'activity_id', 'error',
   ];
 
-  test('the table spec and the node agree on the column set', () => {
-    // The Data Table node maps by NAME. A column in one list and not the other
-    // is a value that vanishes on write with no error anywhere — so the two
-    // lists are compared here rather than being kept in step by hand.
-    const spec = JSON.parse(
-      readFileSync(join(ROOT, 'config', 'icp_audit_table.json'), 'utf8')
-    );
-    assert.deepEqual(spec.columns.map((c) => c.name), EXPECTED_COLUMNS);
-    const TYPES = new Set(['string', 'number', 'boolean', 'date']);
-    for (const column of spec.columns) {
-      assert.ok(TYPES.has(column.type), `${column.name}: n8n Data Tables have no "${column.type}" type`);
-    }
-  });
-
-  test('every emitted value fits the type its column declares', () => {
-    const spec = JSON.parse(
-      readFileSync(join(ROOT, 'config', 'icp_audit_table.json'), 'utf8')
-    );
-    const typeOf = new Map(spec.columns.map((c) => [c.name, c.type]));
-    for (const name of [
-      'icp_scored_A.json', 'icp_scored_B_stable.json', 'icp_scored_contracting_valid.json',
-      'icp_scored_insufficient.json', 'icp_scored_tier2.json',
-    ]) {
-      const [row] = auditRow(scored(name));
+  test('every emitted value is a scalar a human can read in a trace', () => {
+    // No nested objects, no arrays: the summary is one flat line per run, and
+    // a nested value in it is a value nobody reads.
+    for (const name of VALID_FIXTURES) {
+      const [row] = runSummary(scored(name));
       for (const [key, value] of Object.entries(row.json)) {
-        const expected = typeOf.get(key);
-        if (expected === 'number') assert.equal(typeof value, 'number', `${name} / ${key} = ${JSON.stringify(value)}`);
-        else if (expected === 'boolean') assert.equal(typeof value, 'boolean', `${name} / ${key}`);
-        else assert.equal(typeof value, 'string', `${name} / ${key} = ${JSON.stringify(value)}`);
+        assert.ok(
+          value === null || ['string', 'number', 'boolean'].includes(typeof value),
+          `${name} / ${key} is ${typeof value}`
+        );
       }
     }
   });
 
-  test('the row has the §8.4 columns, in the §8.4 order', () => {
+  test('the summary has its keys, in order', () => {
     const out = scored('icp_scored_A.json');
-    const [row] = auditRow(out);
+    const [row] = runSummary(out);
     assert.deepEqual(Object.keys(row.json), EXPECTED_COLUMNS);
-    assert.equal(EXPECTED_COLUMNS.length, 37);
+    assert.equal(EXPECTED_COLUMNS.length, 38);
   });
 
   test('a scored run fills the score columns', () => {
@@ -930,7 +973,7 @@ describe('BuildAuditRow', () => {
     const { org } = orgFixture('org_full.json', cfg);
     const patch = orgPatch(out0, org)[0].json;
     const activity = buildActivity(out0)[0].json;
-    const [row] = auditRow(out0, {
+    const [row] = runSummary(out0, {
       BuildOrgPatch: patch, BuildActivity: activity, 'POST activity': { data: { id: 7788 } },
     });
     const r = row.json;
@@ -956,7 +999,7 @@ describe('BuildAuditRow', () => {
     scored(event, staticData);
     const out0 = scored(event, staticData);
     assert.equal(out0._duplicate, true);
-    const [row] = auditRow(out0);
+    const [row] = runSummary(out0);
     assert.match(row.json.error, /duplicate/);
     assert.equal(row.json.patch_written, false);
     assert.equal(row.json.activity_id, '', 'a duplicate leaves no activity');
@@ -965,7 +1008,7 @@ describe('BuildAuditRow', () => {
 
   test('evidence_json covers the four classifiers and only those', () => {
     const out = scored('icp_scored_A.json');
-    const [row] = auditRow(out);
+    const [row] = runSummary(out);
     const evidence = JSON.parse(row.json.evidence_json);
     // v6 gives every component evidence, including the three the table levels
     // itself, so all seven are recorded.
@@ -979,7 +1022,7 @@ describe('BuildAuditRow', () => {
 
   test('missing_inputs is recorded per classifier', () => {
     const out = scored('icp_scored_insufficient.json');
-    const [row] = auditRow(out);
+    const [row] = runSummary(out);
     assert.match(row.json.missing_inputs, /stage_maturity:funding_stage/);
     assert.equal(row.json.grade, '', 'no grade on insufficient data');
     assert.equal(row.json.status, 'insufficient_data');
@@ -994,27 +1037,27 @@ describe('BuildAuditRow', () => {
     // the conflict the table itself reported — something that explains a score
     // rather than contradicting it.
     const out = scored('icp_scored_contracting_valid.json');
-    const [row] = auditRow(out);
+    const [row] = runSummary(out);
     assert.match(row.json.error, /^conflict:headcount fell 18%/);
   });
 
   test('the five v6 columns carry what they say', () => {
-    const [row] = auditRow(scored('icp_scored_A.json'));
+    const [row] = runSummary(scored('icp_scored_A.json'));
     assert.equal(row.json.requested_at, '2026-09-18T10:42:00Z');
     assert.equal(row.json.revenue_source, 'headcount_band');
     assert.equal(row.json.eng_open, 3);
     assert.equal(row.json.eng_open_60d_plus, 2);
     assert.equal(row.json.contracting_guard_applied, false);
-    assert.equal(auditRow(scored('icp_scored_contracting_unbacked.json'))[0].json.contracting_guard_applied, true);
+    assert.equal(runSummary(scored('icp_scored_contracting_unbacked.json'))[0].json.contracting_guard_applied, true);
   });
 
   test('an absent hiring count is -1, not 0', () => {
     // A number column cannot hold "unknown" and 0 would be a lie: the provider
     // returning nothing and a company having nothing open are opposite facts.
-    const [row] = auditRow(scored('icp_scored_insufficient.json'));
+    const [row] = runSummary(scored('icp_scored_insufficient.json'));
     assert.equal(row.json.eng_open, -1);
     assert.equal(row.json.eng_open_60d_plus, -1);
-    assert.equal(auditRow(scored('icp_scored_contracting_valid.json'))[0].json.eng_open, 0,
+    assert.equal(runSummary(scored('icp_scored_contracting_valid.json'))[0].json.eng_open, 0,
       'and a real zero is still a zero');
   });
 });

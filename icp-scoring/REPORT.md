@@ -1043,8 +1043,8 @@ with and nothing needed checking back on before changing:
 
 | field | key | type | created |
 |---|---|---|---|
-| Auto-ICP Score | `d11624207b9c7a4a9c56c9bbac7454db300c8b65` | `varchar` (text) | yes |
-| Sales Rep ICP Score | `ce4100722388927674f8b83bad551a2c666aacd4` | `varchar` (text) | yes |
+| Auto-ICP Score | `d1162420…` | `varchar` (text) | yes |
+| Sales Rep ICP Score | `ce410072…` | `varchar` (text) | yes |
 
 The creation script re-reads before it writes and refuses to act on a name that
 already appears twice, so re-running it cannot add a duplicate — which matters
@@ -1076,11 +1076,11 @@ rather than slipping in.
 to delete them. They still exist on the account:
 
 ```
-ICP Calculated      05a05bfc00c020018c76735b3970fbfa27378af4   enum
-ICP Score           89a19a01cc27ae0fde9183852dc133abf52f18d5   double
-ICP Scored At       80c7b7ee45cc4df1a73bbcb80ac54cc8769cd77d   date
-ICP Model Version   d120f20ad024b2f5b9e9f6dd2302094097707045   varchar
-ICP Final           95449f59b1dbc8d126dfd16bd321dd6eda102eb8   enum   (never written, any version)
+ICP Calculated      05a05bfc…   enum
+ICP Score           89a19a01…   double
+ICP Scored At       80c7b7ee…   date
+ICP Model Version   d120f20a…   varchar
+ICP Final           95449f59…   enum   (never written, any version)
 ```
 
 The error path now writes **nothing** to the organization. A field that says
@@ -1128,7 +1128,7 @@ org 2695, `request_id: req-live-1789647562183`. **Response**: `HTTP 200 ok`.
 **The one field write**, raw from the run:
 
 ```json
-{ "custom_fields": { "d11624207b9c7a4a9c56c9bbac7454db300c8b65": "93 - A" } }
+{ "custom_fields": { "d1162420…": "93 - A" } }
 ```
 
 **The one activity** — id 46828, `type: task`, `done: true`, `org_id: 2695`,
@@ -1211,3 +1211,204 @@ engine therefore scores it 0 and flags `unknown_vertical`, where the sheet gives
 it 10 and a composite of 100. The exporter reports the discrepancy on every run
 rather than coercing it. Either the vertical joins the rubric or the sheet row
 is wrong; I have not chosen.
+
+---
+
+# 15. Phase 1 close-out — 2026-09-17
+
+## What it does, in plain English
+
+A deal is created in Pipedrive. Pipedrive calls a webhook on n8n. n8n looks up
+the deal's organization, decides whether it is worth scoring, and if so sends
+the company's identifiers to a Clay table. Clay enriches the company and
+classifies it — industry, company type, stage, activation, geography, revenue,
+hiring. Clay posts all of that back to a second n8n webhook. n8n scores it
+against the rubric, writes the grade to the organization, and leaves one
+activity on the record explaining the grade in plain words.
+
+Nobody types anything. A rep opening the organization sees a grade, when it was
+worked out, and one note saying why.
+
+## The Pipedrive footprint
+
+Per organization, per scoring run, **two field writes and one activity. That is
+all.**
+
+| field | type | written by | holds |
+|---|---|---|---|
+| Auto-ICP Score | text | the workflow | `"93 - A"`, or `"n/a - insufficient data"` |
+| Auto-ICP Scored At | date | the workflow | the day it was worked out |
+| Sales Rep ICP Score | text | **a human, never the workflow** | whatever a rep wants |
+
+Both written fields move **together, in one PATCH, or not at all** — a score the
+gate can never age out, or a date meaning nothing, are each worse than no write.
+`BuildOrgPatch` refuses a partial write by name (`ICP_PARTIAL_WRITE`) and refuses
+any key outside `CONFIG.fields_written` (`ICP_UNEXPECTED_WRITE`), by allow-list.
+
+Nothing else is touched: no notes, no labels, no owner, no website, no LinkedIn
+URL, no v5 field. A **failed** run touches the organization not at all — it
+leaves one Slack alert and one activity saying the run failed, because a field
+reading "Error" is a field a rep learns to ignore and reads identically to a
+judgement about the company.
+
+The five v5 fields — ICP Calculated, ICP Score, ICP Scored At, ICP Model
+Version, ICP Final — were **deleted from the account** on 2026-09-17.
+
+### Re-scoring
+
+Skip when all three hold: the score matches `^\d{1,3} - [ABC]$`, the date is
+under 180 days old, and the date is on or after `CONFIG.model_effective_date`.
+Any one failing re-scores and overwrites both fields.
+
+`"n/a - insufficient data"` is not a grade, so it always retries. A run that
+found too little must not freeze an account out for six months.
+
+**One deviation, by necessity.** The instruction says *model_version unchanged*.
+Nothing on the organization stores a model version — the field that did was
+deleted, and adding another would break the one-field budget. So the question
+"was this scored under the current rubric?" is answered as "was it scored on or
+after the day the current rubric took effect?" — `model_effective_date` in the
+rubric, `2026-09-17`. Bumping the rubric means bumping that date, and every
+organization re-scores on its next trigger. What it costs, stated: an org scored
+the *same day* a rubric ships is not re-scored by that rule alone and waits for
+the 180 days.
+
+## The note a rep reads
+
+One activity, type `task`, subject `ICP scored`, `done: true` so it lands as a
+record rather than in someone's queue. Pipedrive has no "note" activity type;
+`task` is the generic one this account uses. ≤ 900 characters, no raw field
+names, exactly one CHECK line.
+
+```
+ICP A — 93 out of 100.
+
+FinTech, anchor for us. Software-native. US-based. Revenue around $10M–$25M,
+inferred from headcount rather than read from a filing. Series B–D growth,
+limited internal capacity, active investment + roadmap commitments. 3
+engineering roles open, 2 of them for more than two months, an engineering lead
+in post (Head of Engineering).
+
+We set aside Apollo revenue $1.1M — $12k/employee.
+
+Activation: accelerating, so the score stands in full.
+
+CHECK: the revenue band is an estimate from headcount, not a filing — confirm
+before sizing a deal.
+```
+
+Five blocks, always in this order: the grade; what the company is; what was
+discarded and why; what activation did to the score; one CHECK line. The body is
+written from structured facts in the workflow's own words — evidence is never
+passed through and cleaned, because "no raw field names" cannot be met that way.
+Over budget, whole sentences are dropped in a fixed order; the headline, the
+activation block and the CHECK line always survive.
+
+## NEEDS_DECISION — for Chrissy
+
+### 1. Stage maturity for large enterprises
+
+| account | sheet | engine | gap |
+|---|---|---|---|
+| Microsoft | **7** | 0 | 7 |
+| Merck | **7** | 0 | 7 |
+
+The sheet's rubric text for stage 0 is a mature steady-state organisation with
+no acute pressure; the engine reads a 70,000-person company as exactly that. The
+sheet's reviewers read the same companies as 7. One of the two is wrong about
+what the component means at enterprise scale, and every enterprise account will
+inherit the answer. **Nothing has been changed pending the decision.**
+
+### 2. Activation state — where the data comes from
+
+| account | sheet | engine | why |
+|---|---|---|---|
+| Microsoft | **Contracting** | Stable | no headcount fall in the enrichment to back it |
+
+The v6 guard applies Contracting — a multiplier of **zero**, which takes an
+account off the board — only on a measured fall (`headcount_6mo_growth ≤ -0.15`)
+or a dated layoff/freeze citation. The sheet asserts Contracting for Microsoft;
+the enrichment does not evidence it. Either the guard is too strict, or the
+sheet is recording a judgement the data cannot support. **The guard stays as
+built** until this is settled — the failure it prevents (an unbacked claim
+zeroing a live account) is worse than the one it causes.
+
+### 3. Workato — "Horizontal B2B Software"
+
+| | sheet | engine |
+|---|---|---|
+| vertical | Horizontal B2B Software | same |
+| industry score | **10** | **0** + `unknown_vertical` flag |
+| composite | 100 | 85 |
+| grade | ICP A | ICP A (industry is 15 of 100, so the grade survives) |
+
+That vertical is not one of the 17 in `rubric_v6.json`, and the explicit
+instruction was that it is NOT in the v6 sub-rubric. The sheet scores it 10
+anyway. Either it joins the rubric with a tier, or the row is wrong. The
+exporter reports the discrepancy on every run rather than coercing it.
+
+### 4. Legacy URL fallback — the single highest-leverage fix still open
+
+| identifier source | orgs | share |
+|---|---:|---:|
+| native `website` / `linkedin` — what the workflow reads today | 963 | **4.5%** |
+| adding the legacy custom fields | 7,703 | **35.6%** |
+| recoverable ONLY via a custom field | 6,740 | 31.2% |
+
+An **8× improvement in the input quality of the whole system** for a CONFIG list
+and three lines in `resolveIdentifier`. It is a decision only because *which* of
+the overlapping fields is canonical, and what to do when two disagree, is a
+data-ownership question. Until it lands, most first-pass results come back
+"Insufficient data" — the system working as specified, an honest null beating a
+confident guess, but worth saying before a demo rather than during one.
+
+### 5. Organization duplicates
+
+Measured on the live account, by exact name search:
+
+| name | matching organizations | ids |
+|---|---:|---|
+| Sumersports | **6** | 20683, 20684, 20685, 20686, 3767, 21730 |
+| Merck | 2 exact (+1 "Merck Life Science") | 609, 13961 |
+| Akuvo | 1 exact (+1 "Akuvo Double Janea Involvement") | 2695 |
+
+Scoring is per organization, so six Sumersports records means six scoring runs,
+six grades and six activities for one company — and a rep looking at the wrong
+one of the six sees no grade at all. This is upstream of anything the workflow
+can fix: **deduplicate, or decide which record is canonical and point scoring at
+it.**
+
+### 6. A rounding note, so a comparison is not misread
+
+The sheet keeps decimals (Merck 44.4, Morgan Stanley 95.0); the engine rounds
+half-up to integers (44, 95). **No grade differs at any of the 21 rows** — the
+thresholds are far from every boundary. A final-score-to-final-score comparison
+will show mismatches on most rows and mean nothing; compare grades, or compare
+component levels.
+
+## DEV versus production
+
+| | DEV today | production would need |
+|---|---|---|
+| workflow | `WF-ICP-Score [DEV]`, active, 32 nodes, no red node | a separate production workflow, name without `[DEV]` |
+| Path A trigger | Pipedrive webhook 3167529 → DEV | re-registered against the production URL |
+| Path B target | the DEV callback URL | the production callback URL in `ICP_CLAY_CALLBACK_URL` |
+| Clay | the v6 ICP table's webhook source | the production table, in `ICP_CLAY_ENGINE_URL` |
+| credentials | `pipedrive_main`, `slack_ops` | the same two, values rotated |
+| Slack | `slack_channel_ops` unset — the alert tee dead-ends | a real channel id |
+| error workflow | `settings.errorWorkflow` = the placeholder `WF-ERR` | the production WF-ERR id |
+| scope | one organization (2695) exercised by hand | every `deal.added`, so §4 above decides the first-pass yield |
+| rubric | `model_effective_date: 2026-09-17` | unchanged, unless the rubric moves |
+
+Everything else — the nodes, the rubric, the note format, the field contract —
+is the same build. The patcher is deterministic and `--check` clean, so the
+production export is the same source with different environment variables.
+
+## What is not done
+
+- **The Clay table is not posting yet.** Path A reaches it (`{"success": true}`),
+  and Path B has been exercised end to end with a fixture. The first real event
+  replaces the synthetic `icp_scored_A` fixture when it arrives.
+- **18 of the 21 sheet accounts have no captured facts**, so the per-component
+  agreement table is measured on three. The harness names the other eighteen
+  rather than passing over them.
