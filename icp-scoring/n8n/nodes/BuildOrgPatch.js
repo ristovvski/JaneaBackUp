@@ -56,7 +56,9 @@ if (cfg === null || cfg === undefined) {
 if (cfg === null || cfg === undefined) {
   throw new Error('ICP_NO_CONFIG: neither CONFIG nor CONFIG B is upstream of this node');
 }
-const parsed = $('ParseScored').item.json;
+// Score's output is ParseScored's, plus the grade — so one lookup gets both
+// the classifier evidence and the number it produced.
+const parsed = $('Score').item.json;
 const fetched = $input.first().json;
 const org = fetched.data || fetched;
 const existing = org.custom_fields || {};

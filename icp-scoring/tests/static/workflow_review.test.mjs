@@ -277,10 +277,20 @@ describe('CONFIG is first, and holds everything', () => {
     assert.ok(byName.get('CONFIG').parameters.jsonOutput.includes('now_iso: $now.toISO()'));
     // No node may read the clock for itself: a run straddling midnight must
     // not gate on one date and write another.
+    // Comments are allowed to NAME the accessor while explaining why the node
+    // does not use it — that is the sentence a future reader needs. Only code
+    // counts, so comments come out first.
+    const codeOnly = (src) => src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .map((line) => line.replace(/^\s*\/\/.*$/, ''))
+      .join('\n');
+
     for (const node of wf.nodes.filter((n) => n.type === 'n8n-nodes-base.code')) {
-      assert.ok(!/\$now/.test(node.parameters.jsCode), `${node.name} must read cfg.now_iso, not $now`);
+      const src = codeOnly(node.parameters.jsCode);
+      assert.ok(!/\$now/.test(src), `${node.name} must read cfg.now_iso, not the clock`);
       assert.ok(
-        !/new Date\(\)(?!\.)/.test(node.parameters.jsCode.replace(/new Date\(now\)/g, '')) ||
+        !/new Date\(\)(?!\.)/.test(src.replace(/new Date\(now\)/g, '')) ||
         node.name.startsWith('Dedupe'),
         `${node.name} must not construct its own clock`
       );

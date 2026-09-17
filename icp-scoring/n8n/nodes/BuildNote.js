@@ -41,17 +41,20 @@ if (cfg === null || cfg === undefined) {
 if (cfg === null || cfg === undefined) {
   throw new Error('ICP_NO_CONFIG: neither CONFIG nor CONFIG B is upstream of this node');
 }
-const parsed = $('ParseScored').item.json;
+// Score's output is ParseScored's, plus the grade — so one lookup gets both
+// the classifier evidence and the number it produced.
+const parsed = $('Score').item.json;
 
 const score = parsed.score;
 const components = parsed.components;
 const apollo = parsed.apollo_summary || {};
-const jobs = parsed.jobs || {};
+const hiring = parsed.hiring || {};
 const levels = score.levels;
 
 const MAX = cfg.note_max_chars || 1500;
 const DASH = '—'; // em dash
 const ARROW = '→';
+const GTE = '\u2265'; // ≥
 
 // ---------------------------------------------------------------------------
 // Header
@@ -92,7 +95,6 @@ const rows = [
   { name: 'Stage', level: levels.stage_maturity, text: levelText('stage_maturity', levels.stage_maturity), evidence: components.stage_maturity.evidence || [] },
   { name: 'Type', level: levels.company_type, text: levelText('company_type', levels.company_type), evidence: components.company_type.evidence || [] },
   { name: 'Geography', level: levels.geography, text: levelText('geography', levels.geography), evidence: components.geography.evidence || [] },
-  { name: 'Revenue', level: levels.revenue_range, text: levelText('revenue_range', levels.revenue_range), evidence: components.revenue_range.evidence || [] },
 ];
 
 const componentLine = (row, evidenceCount, textLimit) => {
@@ -111,9 +113,9 @@ const multiplierText = `×${Number(score.multiplier).toFixed(2)}`;
 const activationEvidence = (components.activation_state.evidence || [])[0];
 let activationLine = `Activation: ${score.activation_state_used} ${multiplierText}`;
 if (activationEvidence) activationLine += ` ${DASH} ${activationEvidence}`;
-if (score.flags.indexOf('contracting_without_dated_evidence') !== -1) {
-  activationLine += ` ${DASH} Contracting claimed without dated evidence, downgraded to ` +
-                    `${cfg.activation_default}`;
+if (score.contracting_guard_applied) {
+  activationLine += ` ${DASH} Contracting claimed but not backed (${score.contracting_guard_reason}), ` +
+                    `downgraded to ${cfg.activation_default}`;
 }
 
 let compositeLine = `Composite: ${score.composite}`;
@@ -123,9 +125,10 @@ if (score.status === 'insufficient_data') {
   compositeLine += ` ${multiplierText} ${ARROW} ${score.final_score} ${ARROW} ${calculatedLabel}`;
 }
 
-// A zeroed or discounted score is illegible without the counterfactual, so
-// Contracting always shows what the score would have been.
-if (score.activation_state_used === 'Contracting') {
+// A zeroed or discounted score is illegible without the counterfactual, so the
+// without-activation number is always shown once the multiplier is not 1.00 —
+// and always, without exception, when Contracting zeroed it.
+if (score.activation_state_used === 'Contracting' || Number(score.multiplier) !== 1) {
   const withoutGrade = score.final_score_without_activation >= cfg.thresholds.A
     ? cfg.grade_labels.A
     : score.final_score_without_activation >= cfg.thresholds.B
@@ -137,21 +140,55 @@ if (score.activation_state_used === 'Contracting') {
 
 const show = (v) => (v === null || v === undefined ? 'n/a' : v);
 const engHeadcount = apollo.eng_headcount === null || apollo.eng_headcount === undefined
-  ? jobs.eng_headcount
+  ? hiring.eng_headcount
   : apollo.eng_headcount;
 
 const ref = [];
 ref.push(`HC ${show(apollo.employees)}`);
 ref.push(`eng HC ${show(engHeadcount)}`);
 ref.push(`buying signal ${show(levels.buying_signal)}`);
-// Open engineering roles are the single most-asked-about number behind stage
-// and buying signal, and v6 is the first version that sends them. A null is
-// printed as n/a rather than 0: "the jobs provider returned nothing" and "this
-// company is hiring nobody" are opposite facts and must not read the same.
-if (jobs.eng_open !== undefined) ref.push(`eng roles open ${show(jobs.eng_open)}`);
-if (apollo.revenue_band_used) ref.push(`revenue ${apollo.revenue_band_used}`);
 if (score.tier2_candidate) ref.push('Tier 2 candidate');
 const referenceLine = `Reference: ${ref.join(' · ')}`;
+
+// ---------------------------------------------------------------------------
+// Hiring
+//
+// Three distinct states, and collapsing any two of them would be a lie a rep
+// acts on: postings found, no postings found, and postings found but undated
+// (so "open 60+ days" cannot be computed). A zero and an unknown are opposite
+// facts — that distinction is the whole reason stage_maturity was wrong on
+// Akuvo — so an absent count prints as a sentence, never as 0.
+// ---------------------------------------------------------------------------
+let hiringLine;
+if (hiring.eng_open === null || hiring.eng_open === undefined) {
+  hiringLine = 'Hiring no postings found';
+} else if (hiring.dates_available === false) {
+  hiringLine = `Hiring ${hiring.eng_open} eng open, dates unavailable`;
+} else {
+  const bits = [`${hiring.eng_open} eng open`];
+  if (hiring.eng_open_60d_plus !== null && hiring.eng_open_60d_plus !== undefined) {
+    bits.push(`${hiring.eng_open_60d_plus} ${GTE}60d`);
+  }
+  const leader = (hiring.leader_titles || [])[0];
+  bits.push(leader ? `leader: ${leader}` : 'no eng leader found');
+  if (typeof hiring.eng_open_ratio === 'number') bits.push(`ratio ${hiring.eng_open_ratio}`);
+  hiringLine = `Hiring ${bits.join(', ')}`;
+}
+
+// ---------------------------------------------------------------------------
+// Revenue — the line that names where the number came from.
+//
+// A band inferred from headcount and a band read off a filing are not the same
+// claim, and the rep deciding whether to trust a B is the person who needs to
+// know which one this is.
+// ---------------------------------------------------------------------------
+const revenue = components.revenue_range || {};
+const revenueBits = [`Revenue ${levels.revenue_range}`];
+if (revenue.revenue_band_used) revenueBits.push(revenue.revenue_band_used);
+if (revenue.revenue_source) revenueBits.push(`via ${revenue.revenue_source}`);
+let revenueLine = revenueBits.join(' ');
+const discarded = (revenue.evidence || []).filter((e) => /discard|rejected|ignored/i.test(e));
+if (discarded.length > 0) revenueLine += ` (${discarded[0]})`;
 
 // The table reports a disagreement between two sources here rather than
 // resolving it silently. It never touches the score; it explains it.
@@ -209,6 +246,8 @@ const footer = footerBits.join(' · ');
 const assemble = (evidenceCount, textLimit) => [
   header,
   ...rows.map((row) => componentLine(row, evidenceCount, textLimit)),
+  revenueLine,
+  hiringLine,
   activationLine,
   compositeLine,
   referenceLine,

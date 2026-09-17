@@ -72,7 +72,7 @@ before(async () => {
 function printTable() {
   const lines = [];
   lines.push('');
-  lines.push('GOLDEN SET — ICP v5');
+  lines.push('GOLDEN SET — ICP v6');
   lines.push(`  classifier model : ${MODEL}`);
   lines.push(`  cache entries    : ${cacheSize()}${noCache ? ' (--no-cache: cache bypassed)' : ''}`);
   lines.push(`  accounts scored  : ${results.length} of ${expected.accounts.length}`);
@@ -118,6 +118,68 @@ function printTable() {
   lines.push(fmt(head));
   lines.push('  ' + widths.map((w) => '-'.repeat(w)).join('  '));
   for (const row of rows) lines.push(fmt(row));
+  lines.push('');
+
+  // -------------------------------------------------------------------------
+  // Per-component agreement (§10). The grade is one number; a disagreement in
+  // it says nothing about WHICH component is wrong. This table does.
+  // -------------------------------------------------------------------------
+  const COMPONENT_ROWS = [
+    ['vertical', 'industry_vertical'],
+    ['type', 'company_type'],
+    ['stage', 'stage_maturity'],
+    ['geo', 'geography'],
+    ['revenue', 'revenue_range'],
+    ['activation', 'activation_state'],
+  ];
+
+  const actualFor = (r, component) => {
+    const s = r.scored;
+    switch (component) {
+      case 'industry_vertical': return r.outputs.industry_vertical?.value ?? null;
+      case 'activation_state': return s.activation_state_used;
+      case 'company_type': return s.levels_used.company_type;
+      case 'stage_maturity': return s.levels_used.stage_maturity;
+      case 'geography': return s.levels_used.geography;
+      case 'revenue_range': return s.levels_used.revenue_range;
+      default: return null;
+    }
+  };
+
+  const counted = results.filter((r) => !r.account.suspect);
+  const suspects = results.filter((r) => r.account.suspect);
+  const componentRows = [];
+  for (const [label, component] of COMPONENT_ROWS) {
+    const withCall = counted.filter((r) => (r.account.expected_components || {})[component] !== undefined);
+    const agreed = withCall.filter((r) => {
+      const want = r.account.expected_components[component];
+      return String(want) === String(actualFor(r, component));
+    });
+    const disagreed = withCall
+      .filter((r) => !agreed.includes(r))
+      .map((r) => `${r.account.org} (human ${r.account.expected_components[component]}, engine ${actualFor(r, component)})`);
+    componentRows.push([
+      label,
+      `${agreed.length}/${withCall.length}`,
+      withCall.length === 0 ? '—' : `${((agreed.length / withCall.length) * 100).toFixed(0)}%`,
+      disagreed.length === 0 ? '' : disagreed.slice(0, 3).join('; ') + (disagreed.length > 3 ? ` +${disagreed.length - 3} more` : ''),
+    ]);
+  }
+
+  lines.push('  PER-COMPONENT AGREEMENT' +
+    (suspects.length > 0 ? `  (${suspects.length} suspect row(s) excluded: ${suspects.map((r) => r.account.org).join(', ')})` : ''));
+  const chead = ['component', 'agreed', 'rate', 'disagreements'];
+  const cwidths = chead.map((h, i) => Math.max(h.length, ...componentRows.map((r) => r[i].length)));
+  const cfmt = (cells) => '  ' + cells.map((c, i) => c.padEnd(cwidths[i])).join('  ');
+  lines.push(cfmt(chead));
+  lines.push('  ' + cwidths.map((w) => '-'.repeat(w)).join('  '));
+  for (const row of componentRows) lines.push(cfmt(row));
+  if (componentRows.every((r) => r[1].endsWith('/0'))) {
+    lines.push('');
+    lines.push('  No per-component human calls are loaded. Export the v6 Test Accounts CSV');
+    lines.push('  with Vertical / Type / Stage / Geo / Revenue / Activation columns and run');
+    lines.push('  `npm run golden:export <csv>` to fill this in.');
+  }
   lines.push('');
 
   const graded = results.filter((r) => r.account.expected_grade !== null);
@@ -186,6 +248,47 @@ describe('golden set — hard acceptance assertions', () => {
       `Merck scored A (composite ${merck.scored.composite} x${merck.scored.multiplier} = ${merck.scored.final_score})`
     );
     assert.equal(merck.scored.tier2_candidate, true);
+  });
+});
+
+describe('golden set — per-component agreement (§10)', () => {
+  test('the harness reads per-component human calls when the sheet supplies them', () => {
+    // Before the v6 CSV lands there are no per-component calls to compare
+    // against, and that is reported rather than passed over: a table of zeroes
+    // is a missing input, not a result.
+    const withCalls = expected.accounts.filter((a) => a.expected_components);
+    if (withCalls.length === 0) {
+      assert.equal(expected.source.includes('CSV'), true,
+        'expected.json must say where its rows came from');
+      return;
+    }
+    for (const account of withCalls) {
+      for (const [component, want] of Object.entries(account.expected_components)) {
+        assert.ok(
+          ['industry_vertical', 'activation_state', 'company_type', 'stage_maturity', 'geography', 'revenue_range'].includes(component),
+          `${account.org}: unknown component "${component}"`
+        );
+        if (component === 'industry_vertical') {
+          assert.ok(Object.keys(RUBRIC.industry_verticals).includes(want), `${account.org}: ${want}`);
+        } else if (component === 'activation_state') {
+          assert.ok(Object.keys(RUBRIC.activation_multipliers).includes(want), `${account.org}: ${want}`);
+        } else {
+          assert.ok(RUBRIC.levels.includes(want), `${account.org}: ${component} = ${want}`);
+        }
+      }
+    }
+  });
+
+  test('a suspect row is scored and printed, but never counted', () => {
+    const suspects = expected.accounts.filter((a) => a.suspect);
+    for (const account of suspects) {
+      assert.notEqual(account.hard_assertion, 'must_be_A',
+        `${account.org} is flagged suspect and cannot also carry a hard assertion`);
+    }
+    // Rows 13-15 of the sheet are the ones its own reviewers doubted. Whether
+    // they are loaded yet or not, the rule is the same: a disputed human call
+    // is not a yardstick.
+    assert.ok(suspects.every((a) => a.expected_grade === null || a.suspect === true));
   });
 });
 

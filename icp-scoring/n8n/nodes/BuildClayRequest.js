@@ -337,11 +337,28 @@ if (!identifier) {
   throw error;
 }
 
+// Pipedrive ids are numbers on the wire, both ways: the table's columns are
+// typed, and a column that is sometimes "2695" and sometimes 2695 does not join
+// against anything. They stay STRINGS inside this workflow, where they are
+// identifiers and never arithmetic — Normalize is explicit about that — so the
+// conversion happens here, at the boundary, and nowhere else.
+const wireId = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
 const body = (() => {
   const out = {
     request_id: gate.request_id,
-    org_id: gate.org_id,
-    deal_id: gate.deal_id === undefined ? null : gate.deal_id,
+    org_id: wireId(gate.org_id),
+    deal_id: wireId(gate.deal_id),
+    // The table's AI columns use this as "today" for days-open arithmetic on
+    // job postings. It comes from CONFIG rather than from $now here so that
+    // every node in one execution agrees on the same instant — a run that
+    // straddles midnight must not tell the table one date and the audit row
+    // another.
+    requested_at: cfg.now_iso,
     identifier_kind: identifier.kind,
     identifier_value: identifier.value,
     domain: identifier.kind === 'domain' ? identifier.value : normalizeDomain(gate.org_website),

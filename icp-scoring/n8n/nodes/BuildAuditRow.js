@@ -30,7 +30,9 @@ if (cfg === null || cfg === undefined) {
 if (cfg === null || cfg === undefined) {
   throw new Error('ICP_NO_CONFIG: neither CONFIG nor CONFIG B is upstream of this node');
 }
-const parsed = $('ParseScored').item.json;
+// Score's output is ParseScored's, plus the grade — so one lookup gets both
+// the classifier evidence and the number it produced.
+const parsed = $('Score').item.json;
 
 // The patch and note nodes do not run on a duplicate or an error branch, so
 // read them defensively rather than assuming the happy path.
@@ -46,11 +48,12 @@ const components = parsed.components;
 const levels = score.levels;
 
 const COLUMNS = [
-  'ts', 'request_id', 'execution_id', 'trigger', 'deal_id', 'org_id',
+  'ts', 'requested_at', 'request_id', 'execution_id', 'trigger', 'deal_id', 'org_id',
   'identifier_kind', 'identifier_value', 'model_version',
   'industry_vertical', 'industry_level', 'stage_level', 'type_level',
-  'geo_level', 'revenue_level', 'buying_level',
-  'activation_state', 'multiplier', 'composite', 'final',
+  'geo_level', 'revenue_level', 'revenue_source', 'buying_level',
+  'eng_open', 'eng_open_60d_plus',
+  'activation_state', 'contracting_guard_applied', 'multiplier', 'composite', 'final',
   'final_without_activation', 'grade', 'status', 'confidence_overall',
   'tier2_candidate', 'flags', 'missing_inputs', 'evidence_json',
   'patch_written', 'note_id', 'error',
@@ -84,13 +87,24 @@ if (parsed._rate_exceeded) errorBits.push(`rate_exceeded:${parsed._rate_this_hou
 // contradicting it.
 if (parsed.conflict_note) errorBits.push(`conflict:${parsed.conflict_note}`);
 
+// A Data Table number column cannot hold "unknown", and 0 would be a lie: the
+// jobs provider returning nothing and a company having nothing open are
+// opposite facts. -1 is the sentinel, documented in config/icp_audit_table.json
+// and nowhere else, so a query for "companies with no open roles" writes
+// `eng_open = 0` and gets the right answer.
+const count = (v) => (v === null || v === undefined ? -1 : v);
+const hiring = parsed.hiring || {};
+
 const row = {
   ts: cfg.now_iso,
+  requested_at: parsed.requested_at,
   request_id: parsed.request_id,
   execution_id: $execution.id,
   trigger: `clay.${cfg.clay_event_name}`,
-  deal_id: parsed.deal_id === null || parsed.deal_id === undefined ? '' : parsed.deal_id,
-  org_id: parsed.org_id,
+  // Numeric on the wire, string in the table: these are identifiers, and a
+  // column that is sometimes empty cannot be a number column.
+  deal_id: parsed.deal_id === null || parsed.deal_id === undefined ? '' : String(parsed.deal_id),
+  org_id: String(parsed.org_id),
   identifier_kind: parsed.identifier_kind,
   identifier_value: parsed.identifier_value,
   model_version: parsed.model_version,
@@ -101,9 +115,14 @@ const row = {
   type_level: levels.company_type,
   geo_level: levels.geography,
   revenue_level: levels.revenue_range,
+  revenue_source: (components.revenue_range || {}).revenue_source || '',
   buying_level: levels.buying_signal,
 
+  eng_open: count(hiring.eng_open),
+  eng_open_60d_plus: count(hiring.eng_open_60d_plus),
+
   activation_state: score.activation_state_used,
+  contracting_guard_applied: score.contracting_guard_applied === true,
   multiplier: score.multiplier,
   composite: score.composite,
   final: score.final_score,

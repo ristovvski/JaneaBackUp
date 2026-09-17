@@ -116,6 +116,32 @@ const iVertical = col('vertical', 'industry vertical', 'industry');
 const iActivation = col('activation', 'activation state');
 const iGrade = col('expected grade', 'grade', 'expected', 'icp');
 
+// Per-component human calls. Each is optional: a blank cell means "no human
+// opinion recorded", which golden.test.mjs reports as a gap rather than
+// counting as agreement or disagreement.
+const COMPONENT_COLUMNS = {
+  company_type: col('type', 'company type'),
+  stage_maturity: col('stage', 'stage maturity'),
+  geography: col('geo', 'geography'),
+  revenue_range: col('revenue', 'revenue range', 'revenue band'),
+};
+
+// Rows the sheet's own reviewers marked as doubtful. Flagged, scored, and
+// excluded from the agreement rate — a disputed human call is not a yardstick.
+// The numbers are 1-based data rows, matching how the sheet is read aloud.
+const SUSPECT_ROWS = new Set(
+  (process.env.ICP_SUSPECT_ROWS || '13,14,15')
+    .split(',').map((n) => Number(n.trim())).filter((n) => Number.isFinite(n))
+);
+
+/** A level cell: "10", "level 7", "7 — software-native". */
+const parseLevel = (raw) => {
+  const text = String(raw || '').trim();
+  if (text === '') return null;
+  const m = text.match(/\b(0|3|7|10)\b/);
+  return m ? Number(m[1]) : { unmatched: text };
+};
+
 if (iAccount === -1) {
   process.stderr.write(`No account column found. Headers seen: ${rows[0].join(' | ')}\n`);
   process.exit(1);
@@ -127,9 +153,11 @@ const priorByOrg = new Map(existing.accounts.map((a) => [norm(a.org), a]));
 const accounts = [];
 const discrepancies = [];
 
+let dataRow = 0;
 for (const row of rows.slice(1)) {
   const org = String(row[iAccount] || '').trim();
   if (org === '') continue;
+  dataRow += 1;
 
   const verticalRaw = iVertical === -1 ? '' : row[iVertical];
   const matched = matchVertical(verticalRaw);
@@ -162,12 +190,28 @@ for (const row of rows.slice(1)) {
   // of the sheet, so carry them forward from the existing file.
   const prior = priorByOrg.get(norm(org)) || {};
 
+  const components = {};
+  for (const [name, idx] of Object.entries(COMPONENT_COLUMNS)) {
+    if (idx === -1) continue;
+    const level = parseLevel(row[idx]);
+    if (level && level.unmatched !== undefined) {
+      discrepancies.push(`${org}: ${name} "${level.unmatched}" is not a level 0/3/7/10`);
+      continue;
+    }
+    if (level !== null) components[name] = level;
+  }
+  if (vertical !== null) components.industry_vertical = vertical;
+  if (activation !== null) components.activation_state = activation;
+
   accounts.push({
     org,
+    row: dataRow,
     facts_file: prior.facts_file || null,
     vertical,
     activation,
+    expected_components: Object.keys(components).length > 0 ? components : null,
     expected_grade: expectedGrade,
+    suspect: SUSPECT_ROWS.has(dataRow),
     hard_assertion: prior.hard_assertion || null,
   });
 }

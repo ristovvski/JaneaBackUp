@@ -12,6 +12,11 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import Ajv from 'ajv';
 
+import { validateEvent as inlineValidate } from '../../engine/validate_event.mjs';
+import { buildConfig } from '../../scripts/gen_config_node.mjs';
+
+const cfg = buildConfig();
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (...p) => JSON.parse(readFileSync(join(ROOT, ...p), 'utf8'));
 
@@ -35,10 +40,12 @@ describe('icp_scored_event.schema.json', () => {
     assert.deepEqual(clayFiles, [
       'icp_scored_A.json',
       'icp_scored_B_stable.json',
-      'icp_scored_contracting.json',
+      'icp_scored_contracting_unbacked.json',
+      'icp_scored_contracting_valid.json',
       'icp_scored_insufficient.json',
       'icp_scored_malformed.json',
       'icp_scored_tier2.json',
+      'icp_scored_unknown_vertical.json',
     ]);
   });
 
@@ -52,12 +59,12 @@ describe('icp_scored_event.schema.json', () => {
   test('icp_scored_malformed.json FAILS, and for the reasons it was built to fail for', () => {
     const malformed = read('tests', 'fixtures', 'clay', 'icp_scored_malformed.json');
     assert.equal(validateEvent(malformed), false, 'the malformed fixture must not validate');
-
     const paths = (validateEvent.errors || []).map((e) => e.instancePath);
     const messages = errs(validateEvent);
     assert.ok(messages.includes('additionalProperties') || paths.includes(''), 'extra top-level key');
-    assert.ok(paths.some((p) => p.startsWith('/jobs')), 'missing required jobs key');
-    assert.ok(paths.some((p) => p.startsWith('/score')), 'invalid score block');
+    assert.ok(paths.some((p) => p.startsWith('/org_id')) || messages.includes('integer'), 'quoted id');
+    assert.ok(paths.some((p) => p.startsWith('/cls_all')), 'a broken component');
+    assert.ok(paths.some((p) => p.startsWith('/apollo_summary')), 'a missing apollo key');
   });
 
   test('a valid event turns invalid when any single required key is removed', () => {
@@ -69,52 +76,86 @@ describe('icp_scored_event.schema.json', () => {
     }
   });
 
-  test('an unknown top-level key is rejected (Clay drift must be loud)', () => {
+  test('an unknown top-level key is rejected (table drift must be loud)', () => {
     const mutated = read('tests', 'fixtures', 'clay', 'icp_scored_A.json');
     mutated.brand_new_clay_column = 'surprise';
     assert.equal(validateEvent(mutated), false);
   });
 
-  test('status insufficient_data and a non-null grade cannot coexist', () => {
-    const mutated = read('tests', 'fixtures', 'clay', 'icp_scored_insufficient.json');
-    assert.equal(mutated.score.status, 'insufficient_data');
-    assert.equal(mutated.score.grade, null);
-    mutated.score.grade = 'A';
-    assert.equal(validateEvent(mutated), false, 'insufficient_data with a grade must fail');
+  test('the event carries no score — the table classifies, n8n scores', () => {
+    // The clearest statement of the v6 split, as a test rather than a comment.
+    assert.equal(eventSchema.properties.score, undefined);
+    assert.ok(!eventSchema.required.includes('score'));
+    for (const file of clayFiles) {
+      const event = read('tests', 'fixtures', 'clay', file);
+      assert.equal(event.score, undefined, `${file} must not carry a score`);
+    }
+    const mutated = read('tests', 'fixtures', 'clay', 'icp_scored_A.json');
+    mutated.score = { grade: 'A', final_score: 93 };
+    assert.equal(validateEvent(mutated), false, 'and one that does is rejected');
   });
 
-  test('status scored requires a grade', () => {
+  test('ids are integers on the wire, never quoted', () => {
+    for (const file of clayFiles.filter((f) => !f.includes('malformed'))) {
+      const event = read('tests', 'fixtures', 'clay', file);
+      assert.equal(typeof event.org_id, 'number', file);
+      assert.ok(Number.isInteger(event.org_id), file);
+      if (event.deal_id !== null) assert.ok(Number.isInteger(event.deal_id), file);
+    }
     const mutated = read('tests', 'fixtures', 'clay', 'icp_scored_A.json');
-    mutated.score.grade = null;
+    mutated.org_id = '10001';
     assert.equal(validateEvent(mutated), false);
   });
 
-  test('only the three rubric multipliers are accepted', () => {
-    const base = read('tests', 'fixtures', 'clay', 'icp_scored_A.json');
-    for (const m of Object.values(RUBRIC.activation_multipliers)) {
-      const ok = structuredClone(base);
-      ok.score.multiplier = m;
-      // The rest of the score block still has to agree, so only check the enum
-      // by asserting the multiplier is not itself the cause of a failure.
-      validateEvent(ok);
-      const multErrors = (validateEvent.errors || []).filter((e) => e.instancePath === '/score/multiplier');
-      assert.equal(multErrors.length, 0, `multiplier ${m} must be allowed`);
-    }
-    const bad = structuredClone(base);
-    bad.score.multiplier = 0.5;
-    assert.equal(validateEvent(bad), false);
+  test('requested_at is required — the guard measures evidence age against it', () => {
+    const mutated = read('tests', 'fixtures', 'clay', 'icp_scored_A.json');
+    delete mutated.requested_at;
+    assert.equal(validateEvent(mutated), false);
   });
 
   test('a level outside 0/3/7/10 is rejected wherever it appears', () => {
-    for (const key of ['industries', 'geography', 'stage_maturity']) {
-      const mutated = read('tests', 'fixtures', 'clay', 'icp_scored_A.json');
-      mutated.score.levels[key] = 5;
-      assert.equal(validateEvent(mutated), false, `score.levels.${key}`);
-    }
-    for (const component of ['company_type', 'stage_maturity']) {
+    for (const component of ['company_type', 'stage_maturity', 'geography', 'revenue_range', 'buying_signal']) {
       const mutated = read('tests', 'fixtures', 'clay', 'icp_scored_A.json');
       mutated.cls_all[component].level = 5;
-      assert.equal(validateEvent(mutated), false, `cls_all.${component}.level`);
+      assert.equal(validateEvent(mutated), false, component);
+    }
+  });
+
+  test('a null level is legal — it is how the table says it could not tell', () => {
+    const mutated = read('tests', 'fixtures', 'clay', 'icp_scored_A.json');
+    mutated.cls_all.stage_maturity.level = null;
+    assert.ok(validateEvent(mutated), errs(validateEvent));
+  });
+
+  test('engineering_hiring allows nulls throughout but not missing keys', () => {
+    const base = read('tests', 'fixtures', 'clay', 'icp_scored_A.json');
+    const nulled = structuredClone(base);
+    for (const key of ['total_open', 'eng_open', 'eng_open_60d_plus', 'dates_available', 'eng_open_ratio', 'eng_headcount']) {
+      nulled.cls_all.engineering_hiring[key] = null;
+    }
+    assert.ok(validateEvent(nulled), errs(validateEvent));
+
+    for (const key of Object.keys(base.cls_all.engineering_hiring)) {
+      const missing = structuredClone(base);
+      delete missing.cls_all.engineering_hiring[key];
+      assert.equal(validateEvent(missing), false, `removing ${key} should fail`);
+    }
+  });
+
+  test('activation_evidence_dated is a citation, not a boolean', () => {
+    const mutated = read('tests', 'fixtures', 'clay', 'icp_scored_A.json');
+    mutated.cls_all.activation_state.activation_evidence_dated = true;
+    assert.equal(validateEvent(mutated), false);
+  });
+
+  test('the JSON Schema and the inline validator agree on every fixture', () => {
+    // Two implementations of one contract: ajv for a reviewer, plain JS for the
+    // Code node. A fixture either passes both or fails both.
+    for (const file of clayFiles) {
+      const event = read('tests', 'fixtures', 'clay', file);
+      const bySchema = validateEvent(event);
+      const byCode = inlineValidate(event, cfg).length === 0;
+      assert.equal(bySchema, byCode, `${file}: ajv says ${bySchema}, the node says ${byCode}`);
     }
   });
 });
@@ -219,58 +260,52 @@ describe('classifier_output.schema.json — the per-component discriminator', ()
   });
 
   test('every cls_all entry of every clay fixture validates as a classifier output', () => {
-    // v6 keeps four classifiers; geography, revenue_range and buying_signal are
-    // levelled by the table and have no classifier object to validate. The
-    // levelled two carry `level` where the classifier schema says `value`, so
-    // the key is renamed for the check rather than the schema being loosened.
-    // activation_state is deliberately absent. The classifier contract says the
-    // evidence age in MONTHS; the v6 event carries the boolean the rubric
-    // actually turns that into (`months <= contracting_max_age_months`). Two
-    // contracts at two points, with the table doing the conversion — checked
-    // one test down rather than by loosening either schema.
-    const VALUE_KEY = { industry_vertical: 'value', company_type: 'level', stage_maturity: 'level' };
+    // The classifier contract still describes what a classifier emits; the
+    // event contract describes what the table forwards. They line up for every
+    // component except the two noted below.
+    const VALUE_KEY = {
+      industry_vertical: 'value', activation_state: 'value',
+      company_type: 'level', stage_maturity: 'level',
+      geography: 'level', revenue_range: 'level', buying_signal: 'level',
+    };
     for (const file of clayFiles.filter((f) => !f.includes('malformed'))) {
       const event = read('tests', 'fixtures', 'clay', file);
       for (const [component, key] of Object.entries(VALUE_KEY)) {
         const payload = event.cls_all[component];
+        // An unknown vertical is a v6 case the classifier schema's enum of 17
+        // cannot express — and must not, since the point of the case is that
+        // the value is outside the rubric. Checked instead by the Score node's
+        // unknown_vertical test.
+        if (component === 'industry_vertical' && file.includes('unknown_vertical')) continue;
+        // activation_state's dating field is a month count in the classifier
+        // contract and a citation string in the event; see the next test.
+        if (component === 'activation_state') continue;
         const ok = validateClassifier({
           component,
           value: payload[key],
           evidence: payload.evidence,
-          confidence: payload.confidence,
-          missing_inputs: payload.missing_inputs,
+          confidence: payload.confidence === undefined ? 'high' : payload.confidence,
+          missing_inputs: payload.missing_inputs || [],
         });
         assert.ok(ok, `${file} / ${component}: ${errs(validateClassifier)}`);
       }
     }
   });
 
-  test('activation_evidence_dated is the classifier month count run through the rubric', () => {
-    const rubric = read('config', 'rubric_v6.json');
-    const maxAge = rubric.activation_contracting_evidence_max_age_months;
+  test('activation_evidence_dated is a citation the guard reads, not a month count', () => {
+    // The classifier contract says the evidence age in MONTHS. The v6 event
+    // carries the citation itself, and engine/activation_guard.mjs does the
+    // reading — because "is this dated?" turned out to be the wrong question:
+    // a well-dated funding round is not evidence of contraction.
+    const valid = read('tests', 'fixtures', 'clay', 'icp_scored_contracting_valid.json');
+    assert.equal(valid.cls_all.activation_state.value, 'Contracting');
+    assert.equal(typeof valid.cls_all.activation_state.activation_evidence_dated, 'string');
 
-    // The one fixture that claims Contracting dates its evidence 3 months back,
-    // inside the window, so the boolean must be true and the multiplier must be
-    // Contracting's rather than the downgrade default.
-    const contracting = read('tests', 'fixtures', 'clay', 'icp_scored_contracting.json');
-    assert.ok(3 <= maxAge);
-    assert.equal(contracting.cls_all.activation_state.value, 'Contracting');
-    assert.equal(contracting.cls_all.activation_state.activation_evidence_dated, true);
-    assert.equal(contracting.score.activation_state_used, 'Contracting');
-    assert.equal(contracting.score.multiplier, rubric.activation_multipliers.Contracting);
-
-    // The flag reports whether the activation evidence is dated at all, not
-    // whether the state is Contracting: a dated Accelerating call is still
-    // dated. So it must be a boolean everywhere, and true wherever the case
-    // gives its evidence a date inside the window.
-    for (const file of clayFiles.filter((f) => !f.includes('malformed'))) {
-      const event = read('tests', 'fixtures', 'clay', file);
-      const flag = event.cls_all.activation_state.activation_evidence_dated;
-      assert.equal(typeof flag, 'boolean', `${file}: dating flag must be a boolean, never null`);
-      const hasDatedEvidence = event.cls_all.activation_state.evidence
-        .some((e) => /\d{4}-\d{2}-\d{2}/.test(e));
-      if (flag) assert.ok(hasDatedEvidence, `${file}: flag is true but no evidence string carries a date`);
-    }
+    const unbacked = read('tests', 'fixtures', 'clay', 'icp_scored_contracting_unbacked.json');
+    assert.equal(unbacked.cls_all.activation_state.value, 'Contracting');
+    // Perfectly dated, and still not backing: the citation is a funding event.
+    assert.match(unbacked.cls_all.activation_state.activation_evidence_dated, /\d{4}-\d{2}-\d{2}/);
+    assert.ok(unbacked.apollo_summary.headcount_6mo_growth > 0);
   });
 });
 

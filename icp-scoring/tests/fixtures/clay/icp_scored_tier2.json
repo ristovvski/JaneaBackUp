@@ -1,7 +1,8 @@
 {
-  "request_id": "req-icp-0005",
-  "org_id": "10005",
-  "deal_id": "55005",
+  "request_id": "req-icp-0006",
+  "org_id": 10006,
+  "deal_id": 55006,
+  "requested_at": "2026-09-18T10:42:00Z",
   "identifier_kind": "domain",
   "identifier_value": "merck.com",
   "resolved": {
@@ -10,6 +11,20 @@
     "website": "https://www.merck.com"
   },
   "cls_all": {
+    "engineering_hiring": {
+      "total_open": 400,
+      "eng_open": 40,
+      "eng_open_60d_plus": 12,
+      "dates_available": true,
+      "leader_titles": [
+        "SVP Technology"
+      ],
+      "eng_titles_with_days": [
+        "Data Engineer (30d)"
+      ],
+      "eng_open_ratio": 0.01,
+      "eng_headcount": 4000
+    },
     "industry_vertical": {
       "value": "Pharma / Life Sciences",
       "evidence": [
@@ -21,7 +36,7 @@
     "company_type": {
       "level": 7,
       "evidence": [
-        "website_summary: mission-critical regulated custom software"
+        "mission-critical regulated custom software"
       ],
       "confidence": "high",
       "missing_inputs": []
@@ -29,8 +44,7 @@
     "stage_maturity": {
       "level": 0,
       "evidence": [
-        "li_headcount: 71000",
-        "website_summary: in-house digital and data platform organisation"
+        "apollo.employees: 71000"
       ],
       "confidence": "high",
       "missing_inputs": []
@@ -38,52 +52,37 @@
     "activation_state": {
       "value": "Stable",
       "evidence": [
-        "news_last_12mo: 3 items, none material"
+        "no material news"
       ],
-      "activation_evidence_dated": false,
+      "activation_evidence_dated": null,
       "confidence": "high",
       "missing_inputs": []
     },
-    "conflict_note": null
-  },
-  "jobs": {
-    "eng_open": 40,
-    "eng_open_60d_plus": 12,
-    "has_eng_leader": true,
-    "eng_leader_titles": [
-      "SVP Technology",
-      "VP Data Platform"
-    ],
-    "eng_open_ratio": 0.01,
-    "eng_headcount": 4000,
-    "dates_available": true,
-    "eng_titles": [
-      "Data Engineer",
-      "Cloud Architect"
-    ],
-    "as_of": "2026-09-09"
-  },
-  "score": {
-    "levels": {
-      "industries": 7,
-      "stage_maturity": 0,
-      "company_type": 7,
-      "geography": 10,
-      "revenue_range": 0,
-      "buying_signal": 3
+    "geography": {
+      "level": 10,
+      "evidence": [
+        "apollo.country: United States",
+        "apollo.state: New Jersey"
+      ],
+      "confidence": "high"
     },
-    "composite": 38,
-    "activation_state_used": "Stable",
-    "multiplier": 0.8,
-    "final_score": 30,
-    "final_score_without_activation": 38,
-    "grade": "C",
-    "status": "scored",
-    "confidence_overall": "high",
-    "tier2_candidate": true,
-    "flags": [
-      "tier2_candidate"
-    ]
+    "revenue_range": {
+      "level": 0,
+      "revenue_band_used": "$10B–$100B",
+      "revenue_source": "apollo_revenue",
+      "evidence": [
+        "apollo.annual_revenue: 64000000000"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "buying_signal": {
+      "level": 3,
+      "evidence": [
+        "eng_open: 40"
+      ]
+    },
+    "conflict_note": null
   },
   "apollo_summary": {
     "employees": 71000,
@@ -92,8 +91,10 @@
     "state": "New Jersey",
     "founded_year": 1891,
     "last_round_date": null,
-    "revenue_band_used": "$10B-$100B",
-    "revenue_source": "Apollo"
+    "headcount_6mo_growth": 0.01,
+    "headcount_12mo_growth": 0.02,
+    "publicly_traded_symbol": "MRK",
+    "owned_by_organization_id": null
   },
   "model_version": "v6"
 }

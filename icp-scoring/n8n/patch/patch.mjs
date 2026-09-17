@@ -384,6 +384,12 @@ export function buildWorkflow() {
 
   nodes.push(codeNode('Dedupe B', [340, 700], code('Dedupe')));
 
+  // Score sits between ParseScored and the write gate. It is a separate node
+  // on purpose: ParseScored decides whether the event is admissible, Score
+  // decides what it is worth, and a run trace that shows the two separately is
+  // how you tell "the table sent nonsense" from "the rubric graded it low".
+  nodes.push(codeNode('Score', [640, 620], code('Score')));
+
   nodes.push(codeNode('ParseScored', [540, 700], code('ParseScored'), {
     onError: 'continueErrorOutput',
   }));
@@ -525,7 +531,11 @@ export function buildWorkflow() {
     'Respond 200 B': main('CONFIG B'),
     'CONFIG B': main('Dedupe B'),
     'Dedupe B': main('ParseScored'),
-    ParseScored: { main: [out('IF write allowed?'), out('BuildErrorPatch')] },
+    // ParseScored's second output is its error branch (onError:
+    // continueErrorOutput), so a malformed event skips Score entirely and goes
+    // straight to marking the org Errored.
+    ParseScored: { main: [out('Score'), out('BuildErrorPatch')] },
+    Score: main('IF write allowed?'),
     // A duplicate skips the writes and goes straight to the audit row.
     'IF write allowed?': branch(['GET organization B'], ['BuildAuditRow']),
     'GET organization B': main('BuildOrgPatch'),

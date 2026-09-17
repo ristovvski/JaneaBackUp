@@ -42,58 +42,41 @@ const STATES = ['Accelerating', 'Transitioning', 'Stable', 'Contracting'];
 const CONFIDENCES = ['high', 'medium', 'low'];
 const IDENTIFIER_KINDS = ['domain', 'linkedin', 'name'];
 
-const CLS_LEVELLED = ['company_type', 'stage_maturity'];
+const REQUIRED_TOP = [
+  'request_id', 'org_id', 'requested_at', 'identifier_kind', 'identifier_value',
+  'resolved', 'cls_all', 'apollo_summary', 'model_version',
+];
 
-const JOBS_KEYS = [
-  'eng_open', 'eng_open_60d_plus', 'has_eng_leader', 'eng_leader_titles',
-  'eng_open_ratio', 'eng_headcount', 'dates_available', 'eng_titles', 'as_of',
+// Present or absent, both fine, and ignored either way.
+const IGNORED_TOP = ['event', 'event_id', 'emitted_at', 'clay_table', 'clay_row_url'];
+
+const RESOLVED_KEYS = ['domain', 'linkedin_url', 'website'];
+
+const HIRING_KEYS = [
+  'total_open', 'eng_open', 'eng_open_60d_plus', 'dates_available',
+  'leader_titles', 'eng_titles_with_days', 'eng_open_ratio', 'eng_headcount',
 ];
 
 const APOLLO_KEYS = [
   'employees', 'eng_headcount', 'country', 'state', 'founded_year',
-  'last_round_date', 'revenue_band_used', 'revenue_source',
+  'last_round_date', 'headcount_6mo_growth', 'headcount_12mo_growth',
+  'publicly_traded_symbol', 'owned_by_organization_id',
 ];
 
-const RESOLVED_KEYS = ['domain', 'linkedin_url', 'website'];
-
-const SCORE_LEVEL_KEYS = [
-  'industries', 'stage_maturity', 'company_type',
-  'geography', 'revenue_range', 'buying_signal',
+// Every component, and which of confidence / missing_inputs it must carry.
+// geography and buying_signal are shown in the task without them; accepting
+// either shape costs nothing, and rejecting a run because a sibling key
+// travelled would cost a score.
+const COMPONENTS = [
+  { name: 'industry_vertical', valueKey: 'value', requires: ['confidence', 'missing_inputs'] },
+  { name: 'company_type', valueKey: 'level', requires: ['confidence', 'missing_inputs'] },
+  { name: 'stage_maturity', valueKey: 'level', requires: ['confidence', 'missing_inputs'] },
+  { name: 'activation_state', valueKey: 'value', requires: ['confidence', 'missing_inputs'], extra: ['activation_evidence_dated'] },
+  { name: 'geography', valueKey: 'level', requires: [] },
+  { name: 'revenue_range', valueKey: 'level', requires: ['confidence', 'missing_inputs'], extra: ['revenue_band_used', 'revenue_source'] },
+  { name: 'buying_signal', valueKey: 'level', requires: [] },
 ];
 
-// Keys that may appear and are ignored. They carry no scoring weight, so
-// neither their presence nor their absence is a contract break.
-const IGNORED_TOP = ['event', 'event_id', 'emitted_at', 'clay_table', 'clay_row_url'];
-
-const REQUIRED_TOP = [
-  'request_id', 'org_id', 'identifier_kind', 'identifier_value',
-  'resolved', 'cls_all', 'jobs', 'score', 'apollo_summary', 'model_version',
-];
-
-/** Half-up rounding to an integer. Mirrors engine/scoring.mjs; parity-tested. */
-function roundHalfUp(x) {
-  if (x === null || x === undefined || Number.isNaN(x)) return null;
-  const collapsed = Number(x.toFixed(10));
-  return Math.floor(collapsed + 0.5);
-}
-
-/** Grade from a final score and the rubric thresholds. Boundaries inclusive. */
-function gradeFor(finalScore, thresholds) {
-  if (finalScore === null || finalScore === undefined) return null;
-  if (finalScore >= thresholds.A) return 'A';
-  if (finalScore >= thresholds.B) return 'B';
-  return 'C';
-}
-
-/**
- * Validate one v6 icp.scored event against the rubric carried in CONFIG.
- *
- * @param {object} raw the POSTed body
- * @param {object} cfg the CONFIG node's json
- * @returns {string[]} every problem found, in reading order. Empty means the
- *   event may be written. The caller throws; this function never does, so that
- *   one malformed field does not hide the other nine.
- */
 function validateEvent(raw, cfg) {
   const problems = [];
   const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -103,7 +86,7 @@ function validateEvent(raw, cfg) {
   const isBoolOrNull = (v) => v === null || typeof v === 'boolean';
   const isStringArray = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string');
   const levels = cfg.levels || [0, 3, 7, 10];
-  const isLevel = (v) => levels.indexOf(v) !== -1;
+  const isLevelOrNull = (v) => v === null || levels.indexOf(v) !== -1;
 
   if (!isObject(raw)) return ['the body is not an object'];
 
@@ -117,8 +100,12 @@ function validateEvent(raw, cfg) {
   }
 
   if (typeof raw.request_id !== 'string' || raw.request_id === '') problems.push('request_id must be a non-empty string');
-  if (typeof raw.org_id !== 'string' || raw.org_id === '') problems.push('org_id must be a non-empty string');
-  if (raw.deal_id !== undefined && !isStringOrNull(raw.deal_id)) problems.push('deal_id must be a string or null');
+  // Numeric, as Pipedrive has it and as Path A sends it. A quoted id is not
+  // "close enough": the audit table's columns are typed, and a column that is
+  // sometimes 2695 and sometimes "2695" joins against nothing.
+  if (!Number.isInteger(raw.org_id) || raw.org_id < 1) problems.push(`org_id must be a positive integer, got ${JSON.stringify(raw.org_id)}`);
+  if (raw.deal_id !== undefined && !isIntOrNull(raw.deal_id)) problems.push(`deal_id must be an integer or null, got ${JSON.stringify(raw.deal_id)}`);
+  if (typeof raw.requested_at !== 'string' || raw.requested_at.length < 10) problems.push('requested_at must be an ISO timestamp');
   if (IDENTIFIER_KINDS.indexOf(raw.identifier_kind) === -1) problems.push(`identifier_kind must be one of ${JSON.stringify(IDENTIFIER_KINDS)}`);
   if (typeof raw.identifier_value !== 'string' || raw.identifier_value === '') problems.push('identifier_value must be a non-empty string');
   if (raw.model_version !== cfg.model_version) problems.push(`model_version must be "${cfg.model_version}", got ${JSON.stringify(raw.model_version)}`);
@@ -138,72 +125,88 @@ function validateEvent(raw, cfg) {
 
   // --- cls_all -----------------------------------------------------------
   const cls = raw.cls_all;
-  const checkCommon = (name, c) => {
-    if (!Array.isArray(c.evidence)) problems.push(`cls_all.${name}.evidence must be an array`);
-    else if (!isStringArray(c.evidence)) problems.push(`cls_all.${name}.evidence must contain strings only`);
-    else if (c.evidence.length > 20) problems.push(`cls_all.${name}.evidence has more than 20 items`);
-    if (CONFIDENCES.indexOf(c.confidence) === -1) problems.push(`cls_all.${name}.confidence must be one of ${JSON.stringify(CONFIDENCES)}`);
-    if (!Array.isArray(c.missing_inputs)) problems.push(`cls_all.${name}.missing_inputs must be an array`);
-  };
-
   if (!isObject(cls)) {
     problems.push('cls_all must be an object');
   } else {
-    const known = ['industry_vertical', 'company_type', 'stage_maturity', 'activation_state', 'conflict_note'];
+    const known = COMPONENTS.map((c) => c.name).concat(['engineering_hiring', 'conflict_note']);
     for (const key of Object.keys(cls)) {
       if (known.indexOf(key) === -1) problems.push(`cls_all has an unknown key "${key}"`);
     }
 
-    if (!isObject(cls.industry_vertical)) {
-      problems.push('cls_all.industry_vertical must be an object');
+    const hiring = cls.engineering_hiring;
+    if (!isObject(hiring)) {
+      problems.push('cls_all.engineering_hiring must be an object');
     } else {
-      if (!isStringOrNull(cls.industry_vertical.value)) problems.push('cls_all.industry_vertical.value must be a string or null');
-      checkCommon('industry_vertical', cls.industry_vertical);
-    }
-
-    for (const name of CLS_LEVELLED) {
-      const c = cls[name];
-      if (!isObject(c)) { problems.push(`cls_all.${name} must be an object`); continue; }
-      if (c.level !== null && !isLevel(c.level)) problems.push(`cls_all.${name}.level must be null or one of ${JSON.stringify(levels)}`);
-      checkCommon(name, c);
-    }
-
-    const act = cls.activation_state;
-    if (!isObject(act)) {
-      problems.push('cls_all.activation_state must be an object');
-    } else {
-      if (act.value !== null && STATES.indexOf(act.value) === -1) problems.push(`cls_all.activation_state.value must be null or one of ${JSON.stringify(STATES)}`);
-      if (act.activation_evidence_dated !== undefined && !isBoolOrNull(act.activation_evidence_dated)) {
-        problems.push('cls_all.activation_state.activation_evidence_dated must be a boolean or null');
+      const SHAPE = {
+        total_open: isIntOrNull, eng_open: isIntOrNull, eng_open_60d_plus: isIntOrNull,
+        dates_available: isBoolOrNull, leader_titles: isStringArray,
+        eng_titles_with_days: isStringArray, eng_open_ratio: isNumberOrNull,
+        eng_headcount: isIntOrNull,
+      };
+      for (const key of HIRING_KEYS) {
+        if (!Object.prototype.hasOwnProperty.call(hiring, key)) problems.push(`cls_all.engineering_hiring.${key} is missing`);
+        else if (!SHAPE[key](hiring[key])) problems.push(`cls_all.engineering_hiring.${key} has the wrong type`);
       }
-      checkCommon('activation_state', act);
+      for (const key of Object.keys(hiring)) {
+        if (HIRING_KEYS.indexOf(key) === -1) problems.push(`cls_all.engineering_hiring has an unknown key "${key}"`);
+      }
     }
 
-    if (cls.conflict_note !== undefined && !isStringOrNull(cls.conflict_note)) problems.push('cls_all.conflict_note must be a string or null');
+    for (const spec of COMPONENTS) {
+      const c = cls[spec.name];
+      if (!isObject(c)) { problems.push(`cls_all.${spec.name} must be an object`); continue; }
+
+      if (!Object.prototype.hasOwnProperty.call(c, spec.valueKey)) {
+        problems.push(`cls_all.${spec.name}.${spec.valueKey} is missing`);
+      } else if (spec.valueKey === 'level') {
+        if (!isLevelOrNull(c.level)) problems.push(`cls_all.${spec.name}.level must be null or one of ${JSON.stringify(levels)}, got ${JSON.stringify(c.level)}`);
+      } else if (spec.name === 'industry_vertical') {
+        if (!isStringOrNull(c.value)) problems.push('cls_all.industry_vertical.value must be a string or null');
+      } else if (c.value !== null && STATES.indexOf(c.value) === -1) {
+        problems.push(`cls_all.activation_state.value must be null or one of ${JSON.stringify(STATES)}`);
+      }
+
+      if (!Array.isArray(c.evidence)) problems.push(`cls_all.${spec.name}.evidence must be an array`);
+      else if (!isStringArray(c.evidence)) problems.push(`cls_all.${spec.name}.evidence must contain strings only`);
+      else if (c.evidence.length > 20) problems.push(`cls_all.${spec.name}.evidence has more than 20 items`);
+
+      for (const key of spec.requires) {
+        if (!Object.prototype.hasOwnProperty.call(c, key)) problems.push(`cls_all.${spec.name}.${key} is missing`);
+      }
+      if (c.confidence !== undefined && CONFIDENCES.indexOf(c.confidence) === -1) {
+        problems.push(`cls_all.${spec.name}.confidence must be one of ${JSON.stringify(CONFIDENCES)}`);
+      }
+      if (c.missing_inputs !== undefined && !isStringArray(c.missing_inputs)) {
+        problems.push(`cls_all.${spec.name}.missing_inputs must be an array of strings`);
+      }
+      if (spec.name === 'activation_state' && c.activation_evidence_dated !== undefined && !isStringOrNull(c.activation_evidence_dated)) {
+        problems.push('cls_all.activation_state.activation_evidence_dated must be a citation string or null');
+      }
+      if (spec.name === 'revenue_range') {
+        for (const key of ['revenue_band_used', 'revenue_source']) {
+          if (!Object.prototype.hasOwnProperty.call(c, key)) problems.push(`cls_all.revenue_range.${key} is missing`);
+          else if (!isStringOrNull(c[key])) problems.push(`cls_all.revenue_range.${key} must be a string or null`);
+        }
+      }
+
+      const allowedKeys = ['evidence', spec.valueKey].concat(spec.requires, spec.extra || [], ['confidence', 'missing_inputs']);
+      for (const key of Object.keys(c)) {
+        if (allowedKeys.indexOf(key) === -1) problems.push(`cls_all.${spec.name} has an unknown key "${key}"`);
+      }
+    }
+
+    if (cls.conflict_note !== undefined && !isStringOrNull(cls.conflict_note)) {
+      problems.push('cls_all.conflict_note must be a string or null');
+    }
   }
 
-  // --- jobs and apollo_summary -------------------------------------------
-  const JOB_SHAPE = {
-    eng_open: isIntOrNull, eng_open_60d_plus: isIntOrNull, has_eng_leader: isBoolOrNull,
-    eng_leader_titles: isStringArray, eng_open_ratio: isNumberOrNull, eng_headcount: isIntOrNull,
-    dates_available: isBoolOrNull, eng_titles: isStringArray, as_of: isStringOrNull,
-  };
-  if (!isObject(raw.jobs)) {
-    problems.push('jobs must be an object');
-  } else {
-    for (const key of JOBS_KEYS) {
-      if (!Object.prototype.hasOwnProperty.call(raw.jobs, key)) problems.push(`jobs.${key} is missing`);
-      else if (!JOB_SHAPE[key](raw.jobs[key])) problems.push(`jobs.${key} has the wrong type`);
-    }
-    for (const key of Object.keys(raw.jobs)) {
-      if (JOBS_KEYS.indexOf(key) === -1) problems.push(`jobs has an unknown key "${key}"`);
-    }
-  }
-
+  // --- apollo_summary ----------------------------------------------------
   const APOLLO_SHAPE = {
     employees: isIntOrNull, eng_headcount: isIntOrNull, country: isStringOrNull,
     state: isStringOrNull, founded_year: isIntOrNull, last_round_date: isStringOrNull,
-    revenue_band_used: isStringOrNull, revenue_source: isStringOrNull,
+    headcount_6mo_growth: isNumberOrNull, headcount_12mo_growth: isNumberOrNull,
+    publicly_traded_symbol: isStringOrNull,
+    owned_by_organization_id: (v) => v === null || typeof v === 'string' || Number.isInteger(v),
   };
   if (!isObject(raw.apollo_summary)) {
     problems.push('apollo_summary must be an object');
@@ -215,145 +218,6 @@ function validateEvent(raw, cfg) {
     for (const key of Object.keys(raw.apollo_summary)) {
       if (APOLLO_KEYS.indexOf(key) === -1) problems.push(`apollo_summary has an unknown key "${key}"`);
     }
-  }
-
-  // --- score: shape -------------------------------------------------------
-  const score = raw.score;
-  if (!isObject(score)) {
-    problems.push('score must be an object');
-    return problems; // nothing below can be checked without it
-  }
-
-  const SCORE_KEYS = [
-    'levels', 'composite', 'activation_state_used', 'multiplier', 'final_score',
-    'final_score_without_activation', 'grade', 'status', 'confidence_overall',
-    'tier2_candidate', 'flags',
-  ];
-  for (const key of SCORE_KEYS) {
-    if (!Object.prototype.hasOwnProperty.call(score, key)) problems.push(`score.${key} is missing`);
-  }
-  for (const key of Object.keys(score)) {
-    if (SCORE_KEYS.indexOf(key) === -1) problems.push(`score has an unknown key "${key}"`);
-  }
-
-  if (!isObject(score.levels)) {
-    problems.push('score.levels must be an object');
-  } else {
-    for (const key of SCORE_LEVEL_KEYS) {
-      if (!isLevel(score.levels[key])) problems.push(`score.levels.${key} must be one of ${JSON.stringify(levels)}, got ${JSON.stringify(score.levels[key])}`);
-    }
-    for (const key of Object.keys(score.levels)) {
-      if (SCORE_LEVEL_KEYS.indexOf(key) === -1) problems.push(`score.levels has an unknown key "${key}"`);
-    }
-  }
-
-  if (typeof score.composite !== 'number' || score.composite < 0 || score.composite > 100) problems.push('score.composite must be a number in 0..100');
-  if (STATES.indexOf(score.activation_state_used) === -1) problems.push(`score.activation_state_used must be one of ${JSON.stringify(STATES)}`);
-  // Checked here as well as in the arithmetic phase below, which the shape
-  // phase short-circuits: a multiplier of 0.5 is nonsense on its own terms and
-  // should be named even when something else is also wrong.
-  const knownMultipliers = Object.keys(cfg.activation_multipliers || {}).map((k) => cfg.activation_multipliers[k]);
-  if (knownMultipliers.indexOf(score.multiplier) === -1) problems.push(`score.multiplier must be one of ${JSON.stringify(knownMultipliers)}, got ${JSON.stringify(score.multiplier)}`);
-  for (const key of ['final_score', 'final_score_without_activation']) {
-    if (!Number.isInteger(score[key]) || score[key] < 0 || score[key] > 100) problems.push(`score.${key} must be an integer in 0..100`);
-  }
-  if (['scored', 'insufficient_data'].indexOf(score.status) === -1) problems.push('score.status must be "scored" or "insufficient_data"');
-  if (CONFIDENCES.indexOf(score.confidence_overall) === -1) problems.push(`score.confidence_overall must be one of ${JSON.stringify(CONFIDENCES)}`);
-  if (typeof score.tier2_candidate !== 'boolean') problems.push('score.tier2_candidate must be a boolean');
-  if (!isStringArray(score.flags)) problems.push('score.flags must be an array of strings');
-  if (score.status === 'insufficient_data' && score.grade !== null) problems.push('score.grade must be null when status is insufficient_data');
-  if (score.status === 'scored' && ['A', 'B', 'C'].indexOf(score.grade) === -1) problems.push('score.grade must be A, B or C when status is scored');
-
-  // Nothing below can be trusted if the shape is already wrong: an arithmetic
-  // complaint computed from a malformed level is noise on top of the real
-  // problem.
-  if (problems.length > 0) return problems;
-
-  // --- score: arithmetic --------------------------------------------------
-  const weights = cfg.weights || {};
-  const weightSum = Object.keys(weights).reduce((a, k) => a + weights[k], 0);
-  if (weightSum !== 100) {
-    problems.push(`CONFIG.weights must sum to 100, got ${weightSum} — the rubric in CONFIG is broken, not the event`);
-    return problems;
-  }
-
-  let composite = 0;
-  for (const key of Object.keys(weights)) {
-    if (SCORE_LEVEL_KEYS.indexOf(key) === -1) {
-      problems.push(`CONFIG.weights has key "${key}" with no matching score.levels entry`);
-      return problems;
-    }
-    composite += (weights[key] * score.levels[key]) / 10;
-  }
-  composite = Number(composite.toFixed(10));
-  if (composite !== Number(Number(score.composite).toFixed(10))) {
-    problems.push(`score.composite is ${score.composite}, but the posted levels weigh ${composite}`);
-  }
-
-  const expectedMultiplier = (cfg.activation_multipliers || {})[score.activation_state_used];
-  if (expectedMultiplier === undefined) {
-    problems.push(`CONFIG.activation_multipliers has no entry for "${score.activation_state_used}"`);
-  } else if (Number(score.multiplier) !== Number(expectedMultiplier)) {
-    problems.push(`score.multiplier is ${score.multiplier}, but the rubric gives ${score.activation_state_used} a multiplier of ${expectedMultiplier}`);
-  }
-
-  const expectedWithout = roundHalfUp(score.composite);
-  if (score.final_score_without_activation !== expectedWithout) {
-    problems.push(`score.final_score_without_activation is ${score.final_score_without_activation}, but composite ${score.composite} rounds to ${expectedWithout}`);
-  }
-  if (expectedMultiplier !== undefined) {
-    const expectedFinal = roundHalfUp(score.composite * Number(score.multiplier));
-    if (score.final_score !== expectedFinal) {
-      problems.push(`score.final_score is ${score.final_score}, but ${score.composite} x ${score.multiplier} rounds to ${expectedFinal}`);
-    }
-  }
-
-  if (score.status === 'scored') {
-    const expectedGrade = gradeFor(score.final_score, cfg.thresholds);
-    if (score.grade !== expectedGrade) {
-      problems.push(`score.grade is ${JSON.stringify(score.grade)}, but a final score of ${score.final_score} is ${expectedGrade} at thresholds A>=${cfg.thresholds.A} B>=${cfg.thresholds.B}`);
-    }
-  }
-
-  // --- coherence between cls_all and score.levels -------------------------
-  // A level inside `score` that disagrees with the classifier it came from
-  // means the note and the score would tell a rep two different stories.
-  const levelOf = (c) => (c && c.level !== null && c.level !== undefined ? c.level : 0);
-  for (const name of CLS_LEVELLED) {
-    if (score.levels[name] !== levelOf(cls[name])) {
-      problems.push(`score.levels.${name} is ${score.levels[name]}, but cls_all.${name}.level is ${JSON.stringify(cls[name].level)}`);
-    }
-  }
-
-  const vertical = cls.industry_vertical.value;
-  const verticalLevel = (cfg.vertical_level || {})[vertical];
-  if (vertical === null || verticalLevel === undefined) {
-    // The rubric's unknown-vertical rule: level 0 and say so out loud.
-    if (score.levels.industries !== 0) {
-      problems.push(`industry vertical ${JSON.stringify(vertical)} is not in the rubric, so score.levels.industries must be 0, got ${score.levels.industries}`);
-    }
-    if (score.flags.indexOf('unknown_vertical') === -1) {
-      problems.push(`industry vertical ${JSON.stringify(vertical)} is not in the rubric, so score.flags must contain "unknown_vertical"`);
-    }
-  } else if (score.levels.industries !== verticalLevel) {
-    problems.push(`score.levels.industries is ${score.levels.industries}, but the rubric puts "${vertical}" at ${verticalLevel}`);
-  }
-
-  // The activation state the score used must be the one the rubric allows for
-  // what the classifier found: an undated Contracting is downgraded, and a
-  // state the classifier could not determine falls back to the default.
-  const act = cls.activation_state;
-  let expectedState = act.value === null || act.value === undefined ? cfg.activation_default : act.value;
-  let expectDowngradeFlag = false;
-  if (expectedState === 'Contracting' && act.activation_evidence_dated !== true) {
-    expectedState = cfg.activation_default;
-    expectDowngradeFlag = true;
-  }
-  if (score.activation_state_used !== expectedState) {
-    problems.push(`score.activation_state_used is "${score.activation_state_used}", but cls_all.activation_state gives "${expectedState}"`);
-  }
-  if (expectDowngradeFlag && score.flags.indexOf('contracting_without_dated_evidence') === -1) {
-    problems.push('Contracting was claimed without dated evidence, so score.flags must contain "contracting_without_dated_evidence"');
   }
 
   return problems;
@@ -374,59 +238,41 @@ if (problems.length > 0) {
   throw error;
 }
 
-const score = raw.score;
 const cls = raw.cls_all;
+const hiring = cls.engineering_hiring;
 
-// One flat view of the four classifier objects, so the note and the audit row
-// read every component the same way whether it carries a `value` or a `level`.
+// One flat view of the seven components, so the Score node, the note and the
+// audit row all read them the same way whether a component carries a `value`
+// or a `level`, and whether or not it states a confidence. A component that
+// states none is recorded as null rather than as "low": there was no
+// classifier to be unsure, and reading absence as doubt would put three
+// components on the Missing line of every note ever written.
+const flat = (name, valueKey) => {
+  const c = cls[name] || {};
+  return {
+    value: c[valueKey] === undefined ? null : c[valueKey],
+    evidence: c.evidence || [],
+    confidence: c.confidence === undefined ? null : c.confidence,
+    missing_inputs: c.missing_inputs || [],
+  };
+};
+
 const components = {
-  industry_vertical: {
-    value: cls.industry_vertical.value,
-    level: score.levels.industries,
-    evidence: cls.industry_vertical.evidence || [],
-    confidence: cls.industry_vertical.confidence,
-    missing_inputs: cls.industry_vertical.missing_inputs || [],
-  },
-  stage_maturity: {
-    value: score.levels.stage_maturity,
-    level: score.levels.stage_maturity,
-    evidence: cls.stage_maturity.evidence || [],
-    confidence: cls.stage_maturity.confidence,
-    missing_inputs: cls.stage_maturity.missing_inputs || [],
-  },
-  company_type: {
-    value: score.levels.company_type,
-    level: score.levels.company_type,
-    evidence: cls.company_type.evidence || [],
-    confidence: cls.company_type.confidence,
-    missing_inputs: cls.company_type.missing_inputs || [],
-  },
-  activation_state: {
-    value: cls.activation_state.value,
-    level: null,
-    evidence: cls.activation_state.evidence || [],
-    confidence: cls.activation_state.confidence,
-    missing_inputs: cls.activation_state.missing_inputs || [],
+  industry_vertical: flat('industry_vertical', 'value'),
+  company_type: flat('company_type', 'level'),
+  stage_maturity: flat('stage_maturity', 'level'),
+  geography: flat('geography', 'level'),
+  revenue_range: Object.assign(flat('revenue_range', 'level'), {
+    revenue_band_used: cls.revenue_range.revenue_band_used === undefined ? null : cls.revenue_range.revenue_band_used,
+    revenue_source: cls.revenue_range.revenue_source === undefined ? null : cls.revenue_range.revenue_source,
+  }),
+  buying_signal: flat('buying_signal', 'level'),
+  activation_state: Object.assign(flat('activation_state', 'value'), {
     activation_evidence_dated: cls.activation_state.activation_evidence_dated === undefined
       ? null
       : cls.activation_state.activation_evidence_dated,
-  },
+  }),
 };
-
-// Geography, revenue_range and buying_signal have no classifier object in v6.
-// They are levels and nothing else, and saying so explicitly is better than
-// leaving the note to guess why those components have no evidence.
-const COMPUTED = ['geography', 'revenue_range', 'buying_signal'];
-for (const name of COMPUTED) {
-  components[name] = {
-    value: score.levels[name],
-    level: score.levels[name],
-    evidence: [],
-    confidence: null,
-    missing_inputs: [],
-    computed_by_table: true,
-  };
-}
 
 return [{
   json: {
@@ -438,19 +284,18 @@ return [{
 
     request_id: raw.request_id,
     event_id: raw.event_id === undefined ? null : raw.event_id,
-    emitted_at: raw.emitted_at === undefined ? null : raw.emitted_at,
     org_id: raw.org_id,
     deal_id: raw.deal_id === undefined ? null : raw.deal_id,
+    requested_at: raw.requested_at,
     identifier_kind: raw.identifier_kind,
     identifier_value: raw.identifier_value,
 
     resolved: raw.resolved,
     cls_all: cls,
     components: components,
+    hiring: hiring,
     conflict_note: cls.conflict_note === undefined ? null : cls.conflict_note,
-    jobs: raw.jobs,
     apollo_summary: raw.apollo_summary,
-    score: score,
     clay_table: raw.clay_table === undefined ? null : raw.clay_table,
     model_version: raw.model_version,
   },

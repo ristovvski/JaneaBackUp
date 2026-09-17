@@ -1,0 +1,99 @@
+{
+  "request_id": "req-icp-0004",
+  "org_id": 10004,
+  "deal_id": 55004,
+  "requested_at": "2026-09-18T10:42:00Z",
+  "identifier_kind": "domain",
+  "identifier_value": "formstack.com",
+  "resolved": {
+    "domain": "formstack.com",
+    "linkedin_url": "https://www.linkedin.com/company/formstack",
+    "website": "https://formstack.com"
+  },
+  "cls_all": {
+    "engineering_hiring": {
+      "total_open": 6,
+      "eng_open": 2,
+      "eng_open_60d_plus": 0,
+      "dates_available": true,
+      "leader_titles": [
+        "Director of Engineering"
+      ],
+      "eng_titles_with_days": [
+        "Full Stack Engineer (14d)"
+      ],
+      "eng_open_ratio": 0.04,
+      "eng_headcount": 50
+    },
+    "industry_vertical": {
+      "value": "SaaS — Other",
+      "evidence": [
+        "li_industry: Software Development"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "company_type": {
+      "level": 10,
+      "evidence": [
+        "li_description: workflow automation SaaS"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "stage_maturity": {
+      "level": 7,
+      "evidence": [
+        "apollo.funding_events[0]: Series A"
+      ],
+      "confidence": "medium",
+      "missing_inputs": []
+    },
+    "activation_state": {
+      "value": "Contracting",
+      "evidence": [
+        "one article speculates about a slowdown"
+      ],
+      "activation_evidence_dated": "apollo.funding_events[0].date: 2025-09-01",
+      "confidence": "low",
+      "missing_inputs": []
+    },
+    "geography": {
+      "level": 10,
+      "evidence": [
+        "apollo.country: United States"
+      ],
+      "confidence": "high"
+    },
+    "revenue_range": {
+      "level": 7,
+      "revenue_band_used": "$10M–$25M",
+      "revenue_source": "headcount_band",
+      "evidence": [
+        "apollo.employees: 260"
+      ],
+      "confidence": "medium",
+      "missing_inputs": []
+    },
+    "buying_signal": {
+      "level": 3,
+      "evidence": [
+        "eng_open: 2"
+      ]
+    },
+    "conflict_note": "classifier called Contracting; apollo headcount grew 5% over six months"
+  },
+  "apollo_summary": {
+    "employees": 260,
+    "eng_headcount": 50,
+    "country": "United States",
+    "state": "Indiana",
+    "founded_year": 2006,
+    "last_round_date": "2025-09-01",
+    "headcount_6mo_growth": 0.05,
+    "headcount_12mo_growth": 0.09,
+    "publicly_traded_symbol": null,
+    "owned_by_organization_id": null
+  },
+  "model_version": "v6"
+}

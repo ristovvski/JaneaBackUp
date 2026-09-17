@@ -1,7 +1,8 @@
 {
-  "request_id": "req-icp-0004",
-  "org_id": "10004",
-  "deal_id": "55004",
+  "request_id": "req-icp-0005",
+  "org_id": 10005,
+  "deal_id": null,
+  "requested_at": "2026-09-18T10:42:00Z",
   "identifier_kind": "name",
   "identifier_value": "stealth robotics",
   "resolved": {
@@ -10,6 +11,16 @@
     "website": null
   },
   "cls_all": {
+    "engineering_hiring": {
+      "total_open": null,
+      "eng_open": null,
+      "eng_open_60d_plus": null,
+      "dates_available": null,
+      "leader_titles": [],
+      "eng_titles_with_days": [],
+      "eng_open_ratio": null,
+      "eng_headcount": null
+    },
     "industry_vertical": {
       "value": "Manufacturing tech / Industrial IoT",
       "evidence": [
@@ -17,14 +28,14 @@
       ],
       "confidence": "low",
       "missing_inputs": [
-        "website_summary",
+        "website",
         "li_description"
       ]
     },
     "company_type": {
       "level": 3,
       "evidence": [
-        "company_name: Stealth Robotics"
+        "company_name only"
       ],
       "confidence": "low",
       "missing_inputs": [
@@ -37,52 +48,41 @@
       "confidence": "low",
       "missing_inputs": [
         "funding_stage",
-        "open_eng_roles_count"
+        "eng_open"
       ]
     },
     "activation_state": {
-      "value": "Stable",
+      "value": null,
       "evidence": [],
-      "activation_evidence_dated": false,
+      "activation_evidence_dated": null,
       "confidence": "low",
       "missing_inputs": [
-        "news_last_12mo"
+        "news"
       ]
     },
-    "conflict_note": null
-  },
-  "jobs": {
-    "eng_open": null,
-    "eng_open_60d_plus": null,
-    "has_eng_leader": null,
-    "eng_leader_titles": [],
-    "eng_open_ratio": null,
-    "eng_headcount": null,
-    "dates_available": null,
-    "eng_titles": [],
-    "as_of": null
-  },
-  "score": {
-    "levels": {
-      "industries": 3,
-      "stage_maturity": 0,
-      "company_type": 3,
-      "geography": 10,
-      "revenue_range": 0,
-      "buying_signal": 0
+    "geography": {
+      "level": 10,
+      "evidence": [
+        "apollo.country: United States"
+      ],
+      "confidence": "medium"
     },
-    "composite": 22,
-    "activation_state_used": "Stable",
-    "multiplier": 0.8,
-    "final_score": 18,
-    "final_score_without_activation": 22,
-    "grade": null,
-    "status": "insufficient_data",
-    "confidence_overall": "low",
-    "tier2_candidate": false,
-    "flags": [
-      "insufficient:stage_maturity,revenue_range,company_type"
-    ]
+    "revenue_range": {
+      "level": null,
+      "revenue_band_used": null,
+      "revenue_source": null,
+      "evidence": [],
+      "confidence": "low",
+      "missing_inputs": [
+        "apollo.annual_revenue",
+        "apollo.employees"
+      ]
+    },
+    "buying_signal": {
+      "level": 0,
+      "evidence": []
+    },
+    "conflict_note": null
   },
   "apollo_summary": {
     "employees": null,
@@ -91,8 +91,10 @@
     "state": null,
     "founded_year": null,
     "last_round_date": null,
-    "revenue_band_used": null,
-    "revenue_source": null
+    "headcount_6mo_growth": null,
+    "headcount_12mo_growth": null,
+    "publicly_traded_symbol": null,
+    "owned_by_organization_id": null
   },
   "model_version": "v6"
 }

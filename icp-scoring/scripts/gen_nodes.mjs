@@ -21,6 +21,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { BEGIN, END } from './gen_clay_formula.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const NODES = join(ROOT, 'n8n', 'nodes');
@@ -68,6 +69,36 @@ function inlineValidator() {
   return source.slice(start).replace(/^export /gm, '');
 }
 
+// ---------------------------------------------------------------------------
+// engine/scoring.mjs's arithmetic, ready to inline as a function
+//
+// Spliced from engine/clay_formula.txt, whose body
+// tests/contract/clay_parity.test.mjs already asserts is deep-equal to
+// engine/scoring.mjs over 500 generated inputs. So the Score node runs the
+// implementation the parity suite is written against, not a copy of it.
+// ---------------------------------------------------------------------------
+function inlineScorer() {
+  const formula = readFileSync(join(ROOT, 'engine', 'clay_formula.txt'), 'utf8');
+  const from = formula.indexOf(BEGIN);
+  const to = formula.indexOf(END);
+  if (from === -1 || to === -1) throw new Error('markers missing from engine/clay_formula.txt');
+  const body = formula.slice(from + BEGIN.length, to);
+  return `function scoreFromComponents(inputs) {\n${indent(body.trim(), '  ')}\n}`;
+}
+
+// ---------------------------------------------------------------------------
+// engine/activation_guard.mjs, ready to inline
+// ---------------------------------------------------------------------------
+function inlineActivationGuard() {
+  const source = readFileSync(join(ROOT, 'engine', 'activation_guard.mjs'), 'utf8');
+  if (/^\s*import\s/m.test(source)) {
+    throw new Error('engine/activation_guard.mjs gained an import — it can no longer be inlined');
+  }
+  const start = source.indexOf('export const HEADCOUNT_CONTRACTION_THRESHOLD');
+  if (start === -1) throw new Error('cannot find HEADCOUNT_CONTRACTION_THRESHOLD in engine/activation_guard.mjs');
+  return source.slice(start).replace(/^export /gm, '');
+}
+
 // ===========================================================================
 // BuildClayRequest
 // ===========================================================================
@@ -104,11 +135,28 @@ if (!identifier) {
   throw error;
 }
 
+// Pipedrive ids are numbers on the wire, both ways: the table's columns are
+// typed, and a column that is sometimes "2695" and sometimes 2695 does not join
+// against anything. They stay STRINGS inside this workflow, where they are
+// identifiers and never arithmetic — Normalize is explicit about that — so the
+// conversion happens here, at the boundary, and nowhere else.
+const wireId = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
 const body = (() => {
   const out = {
     request_id: gate.request_id,
-    org_id: gate.org_id,
-    deal_id: gate.deal_id === undefined ? null : gate.deal_id,
+    org_id: wireId(gate.org_id),
+    deal_id: wireId(gate.deal_id),
+    // The table's AI columns use this as "today" for days-open arithmetic on
+    // job postings. It comes from CONFIG rather than from $now here so that
+    // every node in one execution agrees on the same instant — a run that
+    // straddles midnight must not tell the table one date and the audit row
+    // another.
+    requested_at: cfg.now_iso,
     identifier_kind: identifier.kind,
     identifier_value: identifier.value,
     domain: identifier.kind === 'domain' ? identifier.value : normalizeDomain(gate.org_website),
@@ -195,59 +243,41 @@ if (problems.length > 0) {
   throw error;
 }
 
-const score = raw.score;
 const cls = raw.cls_all;
+const hiring = cls.engineering_hiring;
 
-// One flat view of the four classifier objects, so the note and the audit row
-// read every component the same way whether it carries a \`value\` or a \`level\`.
+// One flat view of the seven components, so the Score node, the note and the
+// audit row all read them the same way whether a component carries a \`value\`
+// or a \`level\`, and whether or not it states a confidence. A component that
+// states none is recorded as null rather than as "low": there was no
+// classifier to be unsure, and reading absence as doubt would put three
+// components on the Missing line of every note ever written.
+const flat = (name, valueKey) => {
+  const c = cls[name] || {};
+  return {
+    value: c[valueKey] === undefined ? null : c[valueKey],
+    evidence: c.evidence || [],
+    confidence: c.confidence === undefined ? null : c.confidence,
+    missing_inputs: c.missing_inputs || [],
+  };
+};
+
 const components = {
-  industry_vertical: {
-    value: cls.industry_vertical.value,
-    level: score.levels.industries,
-    evidence: cls.industry_vertical.evidence || [],
-    confidence: cls.industry_vertical.confidence,
-    missing_inputs: cls.industry_vertical.missing_inputs || [],
-  },
-  stage_maturity: {
-    value: score.levels.stage_maturity,
-    level: score.levels.stage_maturity,
-    evidence: cls.stage_maturity.evidence || [],
-    confidence: cls.stage_maturity.confidence,
-    missing_inputs: cls.stage_maturity.missing_inputs || [],
-  },
-  company_type: {
-    value: score.levels.company_type,
-    level: score.levels.company_type,
-    evidence: cls.company_type.evidence || [],
-    confidence: cls.company_type.confidence,
-    missing_inputs: cls.company_type.missing_inputs || [],
-  },
-  activation_state: {
-    value: cls.activation_state.value,
-    level: null,
-    evidence: cls.activation_state.evidence || [],
-    confidence: cls.activation_state.confidence,
-    missing_inputs: cls.activation_state.missing_inputs || [],
+  industry_vertical: flat('industry_vertical', 'value'),
+  company_type: flat('company_type', 'level'),
+  stage_maturity: flat('stage_maturity', 'level'),
+  geography: flat('geography', 'level'),
+  revenue_range: Object.assign(flat('revenue_range', 'level'), {
+    revenue_band_used: cls.revenue_range.revenue_band_used === undefined ? null : cls.revenue_range.revenue_band_used,
+    revenue_source: cls.revenue_range.revenue_source === undefined ? null : cls.revenue_range.revenue_source,
+  }),
+  buying_signal: flat('buying_signal', 'level'),
+  activation_state: Object.assign(flat('activation_state', 'value'), {
     activation_evidence_dated: cls.activation_state.activation_evidence_dated === undefined
       ? null
       : cls.activation_state.activation_evidence_dated,
-  },
+  }),
 };
-
-// Geography, revenue_range and buying_signal have no classifier object in v6.
-// They are levels and nothing else, and saying so explicitly is better than
-// leaving the note to guess why those components have no evidence.
-const COMPUTED = ['geography', 'revenue_range', 'buying_signal'];
-for (const name of COMPUTED) {
-  components[name] = {
-    value: score.levels[name],
-    level: score.levels[name],
-    evidence: [],
-    confidence: null,
-    missing_inputs: [],
-    computed_by_table: true,
-  };
-}
 
 return [{
   json: {
@@ -259,29 +289,166 @@ return [{
 
     request_id: raw.request_id,
     event_id: raw.event_id === undefined ? null : raw.event_id,
-    emitted_at: raw.emitted_at === undefined ? null : raw.emitted_at,
     org_id: raw.org_id,
     deal_id: raw.deal_id === undefined ? null : raw.deal_id,
+    requested_at: raw.requested_at,
     identifier_kind: raw.identifier_kind,
     identifier_value: raw.identifier_value,
 
     resolved: raw.resolved,
     cls_all: cls,
     components: components,
+    hiring: hiring,
     conflict_note: cls.conflict_note === undefined ? null : cls.conflict_note,
-    jobs: raw.jobs,
     apollo_summary: raw.apollo_summary,
-    score: score,
     clay_table: raw.clay_table === undefined ? null : raw.clay_table,
     model_version: raw.model_version,
   },
 }];
 `;
 
+// ===========================================================================
+// Score
+// ===========================================================================
+const scoreNode = `${BANNER(['engine/clay_formula.txt (portable body)', 'engine/activation_guard.mjs'])}//
+// Score — the grade, computed HERE.
+//
+// v5 had Clay own a formula column and n8n recompute it as a drift guard. v6
+// removes the duplication instead of policing it: the table classifies and
+// enriches, this node scores, and there is exactly one implementation of the
+// rubric in the delivery path.
+//
+// The arithmetic below is spliced from engine/clay_formula.txt, whose body
+// tests/contract/clay_parity.test.mjs asserts is deep-equal to
+// engine/scoring.mjs over 500 generated inputs — so this is not a
+// reimplementation, it is the tested implementation with the module wrapper
+// removed. tests/static/nodes_execute.test.mjs runs the two side by side on
+// every fixture.
+
+// CONFIG on Path A, CONFIG B on Path B. The two Set nodes hold the same JSON,
+// but a Code node may only reference a node that is CONNECTED upstream of it:
+// n8n raises a "no connection" expression error otherwise, and in the task
+// runner that error's own constructor then throws
+// \`Cannot assign to read only property 'name'\`, which hides the real message
+// completely. A node that runs on both paths therefore has to ask for
+// whichever CONFIG is upstream of it. Kept byte-identical across the nodes
+// that need it; tests/static/workflow_review.test.mjs enforces that.
+let cfg = null;
+try { cfg = $('CONFIG').item.json; } catch (e) { cfg = null; }
+if (cfg === null || cfg === undefined) {
+  try { cfg = $('CONFIG B').item.json; } catch (e) { cfg = null; }
+}
+if (cfg === null || cfg === undefined) {
+  throw new Error('ICP_NO_CONFIG: neither CONFIG nor CONFIG B is upstream of this node');
+}
+const parsed = $input.first().json;
+
+${inlineScorer()}
+
+${inlineActivationGuard()}
+
+const c = parsed.components;
+const apollo = parsed.apollo_summary || {};
+
+// ---------------------------------------------------------------------------
+// The Contracting guard runs BEFORE the scorer, and the scorer's own v5
+// dated-evidence rule is then bypassed by construction: it is handed the state
+// the guard settled on, with an evidence age of 0, so it cannot downgrade a
+// second time and cannot raise the flag twice.
+// ---------------------------------------------------------------------------
+const guard = activationStateFor(
+  cls_allActivation(parsed),
+  apollo,
+  parsed.requested_at,
+  cfg.activation_default
+);
+
+function cls_allActivation(p) {
+  const a = (p.cls_all || {}).activation_state || {};
+  return {
+    value: a.value === undefined ? null : a.value,
+    activation_evidence_dated: a.activation_evidence_dated === undefined ? null : a.activation_evidence_dated,
+  };
+}
+
+const scored = scoreFromComponents({
+  industry_vertical: c.industry_vertical.value,
+  levels: {
+    stage_maturity: c.stage_maturity.value,
+    company_type: c.company_type.value,
+    geography: c.geography.value,
+    revenue_range: c.revenue_range.value,
+    buying_signal: c.buying_signal.value,
+  },
+  activation_state: guard.state,
+  activation_evidence_dated_within_months: 0,
+  confidence: {
+    industry_vertical: c.industry_vertical.confidence,
+    stage_maturity: c.stage_maturity.confidence,
+    company_type: c.company_type.confidence,
+    geography: c.geography.confidence,
+    revenue_range: c.revenue_range.confidence,
+    buying_signal: c.buying_signal.confidence,
+  },
+  missing_inputs: {
+    industry_vertical: c.industry_vertical.missing_inputs,
+    stage_maturity: c.stage_maturity.missing_inputs,
+    company_type: c.company_type.missing_inputs,
+    geography: c.geography.missing_inputs,
+    revenue_range: c.revenue_range.missing_inputs,
+    buying_signal: c.buying_signal.missing_inputs,
+  },
+  // The tier-2 rule reads a revenue NUMBER and a headcount. v6 sends a revenue
+  // BAND, so the revenue half of the rule cannot fire and the headcount half
+  // does the work — which is what the task's tier2 case describes: revenue
+  // level 0, employees over a thousand.
+  facts_summary: {
+    revenue_usd: null,
+    headcount_total: apollo.employees === undefined ? null : apollo.employees,
+    headcount_eng: apollo.eng_headcount === undefined ? null : apollo.eng_headcount,
+  },
+});
+
+const flags = scored.flags.slice();
+if (guard.guard_applied && flags.indexOf('contracting_without_dated_evidence') === -1) {
+  flags.push('contracting_without_dated_evidence');
+}
+
+const score = {
+  levels: {
+    industries: scored.levels_used.industry,
+    stage_maturity: scored.levels_used.stage_maturity,
+    company_type: scored.levels_used.company_type,
+    geography: scored.levels_used.geography,
+    revenue_range: scored.levels_used.revenue_range,
+    buying_signal: scored.levels_used.buying_signal,
+  },
+  industry_tier: scored.industry_tier,
+  composite: scored.composite,
+  activation_state_claimed: (parsed.cls_all.activation_state || {}).value || null,
+  activation_state_used: scored.activation_state_used,
+  contracting_guard_applied: guard.guard_applied,
+  contracting_guard_reason: guard.reason,
+  multiplier: scored.multiplier,
+  final_score: scored.final_score,
+  final_score_without_activation: scored.final_score_without_activation,
+  grade: scored.grade,
+  status: scored.status,
+  confidence_overall: scored.confidence_overall,
+  tier2_candidate: scored.tier2_candidate,
+  flags,
+  model_version: cfg.model_version,
+};
+
+return [{ json: Object.assign({}, parsed, { score }) }];
+`;
+
 writeFileSync(join(NODES, 'BuildClayRequest.js'), buildClayRequest, 'utf8');
 writeFileSync(join(NODES, 'ParseScored.js'), parseScored, 'utf8');
+writeFileSync(join(NODES, 'Score.js'), scoreNode, 'utf8');
 
 process.stdout.write(
   `wrote n8n/nodes/BuildClayRequest.js (${buildClayRequest.length} bytes)\n` +
-  `wrote n8n/nodes/ParseScored.js (${parseScored.length} bytes)\n`
+  `wrote n8n/nodes/ParseScored.js (${parseScored.length} bytes)\n` +
+  `wrote n8n/nodes/Score.js (${scoreNode.length} bytes)\n`
 );

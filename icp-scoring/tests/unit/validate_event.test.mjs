@@ -11,8 +11,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { validateEvent, roundHalfUp, gradeFor } from '../../engine/validate_event.mjs';
-import { roundHalfUp as engineRoundHalfUp, RUBRIC } from '../../engine/scoring.mjs';
+import { validateEvent } from '../../engine/validate_event.mjs';
 import { buildConfig } from '../../scripts/gen_config_node.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -37,8 +36,9 @@ const one = (mutate, pattern) => {
 
 describe('validateEvent accepts what the table is supposed to send', () => {
   for (const name of [
-    'icp_scored_A.json', 'icp_scored_B_stable.json', 'icp_scored_contracting.json',
-    'icp_scored_insufficient.json', 'icp_scored_tier2.json',
+    'icp_scored_A.json', 'icp_scored_B_stable.json', 'icp_scored_contracting_valid.json',
+    'icp_scored_contracting_unbacked.json', 'icp_scored_insufficient.json',
+    'icp_scored_tier2.json', 'icp_scored_unknown_vertical.json',
   ]) {
     test(`${name} is clean`, () => {
       assert.deepEqual(validateEvent(fixture(name), cfg), []);
@@ -50,227 +50,124 @@ describe('validateEvent accepts what the table is supposed to send', () => {
     const withThem = valid();
     withThem.event = 'icp.scored';
     withThem.event_id = 'row-run-1';
-    withThem.emitted_at = '2026-09-16T10:00:00Z';
+    withThem.emitted_at = '2026-09-18T10:42:00Z';
     withThem.clay_table = 'ICP v6';
     withThem.clay_row_url = null;
     assert.deepEqual(validateEvent(withThem, cfg), [], 'present is also fine');
   });
 
-  test('deal_id may be a string, null, or absent entirely', () => {
+  test('deal_id may be an integer, null, or absent entirely', () => {
     for (const mutate of [
-      (e) => { e.deal_id = '55001'; },
+      (e) => { e.deal_id = 55001; },
       (e) => { e.deal_id = null; },
       (e) => { delete e.deal_id; },
     ]) {
       assert.deepEqual(problemsFor(mutate), []);
     }
   });
+
+  test('geography and buying_signal are accepted with or without the optional keys', () => {
+    // The task shows geography without missing_inputs and buying_signal with
+    // neither. Accepting the fuller shape too costs nothing; rejecting a run
+    // because a sibling key travelled would cost a score.
+    assert.deepEqual(problemsFor((e) => {
+      e.cls_all.geography.missing_inputs = ['apollo.country'];
+      e.cls_all.buying_signal.confidence = 'medium';
+      e.cls_all.buying_signal.missing_inputs = [];
+    }), []);
+    assert.deepEqual(problemsFor((e) => {
+      delete e.cls_all.geography.confidence;
+    }), []);
+  });
+
+  test('a score block is not part of the v6 contract', () => {
+    // The table classifies, n8n scores. An event carrying a score means one of
+    // the two is doing the other's job, and that is worth hearing about.
+    one((e) => { e.score = { grade: 'A' }; }, /unknown top-level key "score"/);
+  });
 });
 
 describe('shape', () => {
   test('a missing required key is named', () => {
-    for (const key of ['request_id', 'org_id', 'resolved', 'cls_all', 'jobs', 'score', 'apollo_summary', 'model_version']) {
+    for (const key of [
+      'request_id', 'org_id', 'requested_at', 'identifier_kind', 'identifier_value',
+      'resolved', 'cls_all', 'apollo_summary', 'model_version',
+    ]) {
       one((e) => { delete e[key]; }, new RegExp(`missing "${key}"`));
     }
   });
 
+  test('ids are numbers, not quoted numbers', () => {
+    one((e) => { e.org_id = '10001'; }, /org_id must be a positive integer/);
+    one((e) => { e.deal_id = '55001'; }, /deal_id must be an integer or null/);
+  });
+
   test('an unknown key anywhere is rejected — a table change must be loud', () => {
     one((e) => { e.brand_new_column = 1; }, /unknown top-level key "brand_new_column"/);
-    one((e) => { e.cls_all.geography = {}; }, /cls_all has an unknown key "geography"/);
-    one((e) => { e.jobs.eng_closed = 2; }, /jobs has an unknown key "eng_closed"/);
-    one((e) => { e.score.industry_level = 10; }, /score has an unknown key "industry_level"/);
+    one((e) => { e.cls_all.jobs = {}; }, /cls_all has an unknown key "jobs"/);
+    one((e) => { e.cls_all.engineering_hiring.eng_closed = 2; }, /engineering_hiring has an unknown key "eng_closed"/);
+    one((e) => { e.cls_all.geography.level_reason = 'x'; }, /cls_all.geography has an unknown key "level_reason"/);
     one((e) => { e.resolved.twitter = 'x'; }, /resolved has an unknown key "twitter"/);
     one((e) => { e.apollo_summary.sic_code = '1'; }, /apollo_summary has an unknown key "sic_code"/);
   });
 
-  test('a null where a number belongs is caught, and a null where one is allowed is not', () => {
-    one((e) => { e.jobs.eng_open = 'eleven'; }, /jobs\.eng_open has the wrong type/);
+  test('every hiring count may be null — a provider that found nothing is not malformed', () => {
     assert.deepEqual(problemsFor((e) => {
-      e.jobs.eng_open = null;
-      e.jobs.eng_open_60d_plus = null;
-      e.jobs.has_eng_leader = null;
-    }), [], 'a jobs provider that returned nothing is not a malformed event');
+      e.cls_all.engineering_hiring = {
+        total_open: null, eng_open: null, eng_open_60d_plus: null, dates_available: false,
+        leader_titles: [], eng_titles_with_days: [], eng_open_ratio: null, eng_headcount: null,
+      };
+    }), []);
+    one((e) => { e.cls_all.engineering_hiring.eng_open = 'three'; }, /engineering_hiring.eng_open has the wrong type/);
+    one((e) => { delete e.cls_all.engineering_hiring.dates_available; }, /engineering_hiring.dates_available is missing/);
   });
 
   test('the model version must be the one this workflow holds', () => {
     one((e) => { e.model_version = 'v5'; }, /model_version must be "v6"/);
   });
 
-  test('an off-ladder level is caught in both places it can appear', () => {
-    one((e) => { e.score.levels.geography = 5; }, /score\.levels\.geography must be one of/);
-    one((e) => { e.cls_all.stage_maturity.level = 5; }, /cls_all\.stage_maturity\.level must be null or one of/);
+  test('an off-ladder level is caught on every component that carries one', () => {
+    for (const name of ['company_type', 'stage_maturity', 'geography', 'revenue_range', 'buying_signal']) {
+      one((e) => { e.cls_all[name].level = 5; }, new RegExp(`cls_all.${name}.level must be null or one of`));
+    }
   });
 
-  test('a shape problem short-circuits the arithmetic, so one fault is not reported twice', () => {
-    const problems = problemsFor((e) => { e.score.levels.geography = 5; });
-    assert.ok(!problems.some((p) => /composite/.test(p)), `arithmetic noise:\n  ${problems.join('\n  ')}`);
-  });
-});
-
-describe('arithmetic — the checks that make this a rejection rather than a warning', () => {
-  test('a composite that does not weigh out is rejected', () => {
-    one((e) => { e.score.composite = 61; }, /composite is 61, but the posted levels weigh 92\.5/);
-  });
-
-  test('a final score that is not the rounded product is rejected', () => {
-    one((e) => { e.score.final_score = 90; }, /final_score is 90, but 92\.5 x 1 rounds to 93/);
-  });
-
-  test('a without-activation score that is not the rounded composite is rejected', () => {
-    one((e) => { e.score.final_score_without_activation = 92; }, /final_score_without_activation is 92/);
-  });
-
-  test('a multiplier the rubric does not give that state is rejected', () => {
-    // 0.5 is not a rubric multiplier at all — caught in the shape pass.
-    one((e) => { e.score.multiplier = 0.5; }, /multiplier must be one of/);
-    // 0.95 IS one, just not Accelerating's — caught by the state match, which
-    // is the case that actually happens when a table's table of multipliers
-    // goes stale.
-    one((e) => { e.score.multiplier = 0.95; }, /rubric gives Accelerating a multiplier of 1/);
-    const stable = fixture('icp_scored_B_stable.json');
-    stable.score.multiplier = 1;
-    assert.ok(validateEvent(stable, cfg).some((p) => /rubric gives Stable a multiplier of 0\.8/.test(p)));
-  });
-
-  test('a grade the thresholds do not support is rejected', () => {
-    one((e) => { e.score.grade = 'B'; }, /grade is "B", but a final score of 93 is A/);
-  });
-
-  test('status and grade cannot contradict each other', () => {
-    one((e) => { e.score.status = 'insufficient_data'; }, /grade must be null when status is insufficient_data/);
-    one((e) => { e.score.grade = null; }, /grade must be A, B or C when status is scored/);
-  });
-
-  test('a rubric whose weights do not sum to 100 fails the CONFIG, not the event', () => {
-    const broken = { ...cfg, weights: { ...cfg.weights, geography: 40 } };
-    const problems = validateEvent(valid(), broken);
-    assert.ok(problems.some((p) => /CONFIG\.weights must sum to 100, got 130/.test(p)));
-    assert.ok(problems.some((p) => /the rubric in CONFIG is broken, not the event/.test(p)));
-  });
-});
-
-describe('coherence between the classifiers and the levels', () => {
-  test('a level inside score must match the classifier it came from', () => {
-    one((e) => { e.cls_all.stage_maturity.level = 3; }, /score\.levels\.stage_maturity is 10, but cls_all\.stage_maturity\.level is 3/);
-    one((e) => { e.cls_all.company_type.level = 7; }, /score\.levels\.company_type is 10, but cls_all\.company_type\.level is 7/);
-  });
-
-  test('a null classifier level means 0, not "anything goes"', () => {
-    const problems = problemsFor((e) => {
+  test('a null level is allowed — it is how the table says it could not tell', () => {
+    assert.deepEqual(problemsFor((e) => {
       e.cls_all.stage_maturity.level = null;
-    });
-    assert.ok(problems.some((p) => /score\.levels\.stage_maturity is 10, but cls_all\.stage_maturity\.level is null/.test(p)));
+      e.cls_all.revenue_range.level = null;
+    }), []);
   });
 
-  test('the industry level must match the rubric tier of the vertical', () => {
-    // FinTech is Anchor, which is 10. Claiming 7 for it is the stale-vertical-map
-    // failure: plausible, invisible, and one grade wrong on every fintech.
-    one((e) => {
-      e.score.levels.industries = 7;
-      e.score.composite = 88;
-      e.score.final_score = 88;
-      e.score.final_score_without_activation = 88;
-    }, /score\.levels\.industries is 7, but the rubric puts "FinTech" at 10/);
+  test('activation_evidence_dated is a citation string, not a boolean', () => {
+    one((e) => { e.cls_all.activation_state.activation_evidence_dated = true; },
+      /activation_evidence_dated must be a citation string or null/);
+    assert.deepEqual(problemsFor((e) => { e.cls_all.activation_state.activation_evidence_dated = null; }), []);
   });
 
-  test('an unknown vertical must be levelled 0 and flagged', () => {
-    one((e) => { e.cls_all.industry_vertical.value = 'Crypto Casinos'; },
-      /is not in the rubric, so score\.levels\.industries must be 0/);
-    one((e) => {
-      e.cls_all.industry_vertical.value = 'Crypto Casinos';
-      e.score.levels.industries = 0;
-      e.score.composite = 77.5;
-      e.score.final_score = 78;
-      e.score.final_score_without_activation = 78;
-    }, /so score\.flags must contain "unknown_vertical"/);
-
-    // Levelled 0, flagged, and the arithmetic redone: accepted.
-    const honest = valid();
-    honest.cls_all.industry_vertical.value = 'Crypto Casinos';
-    honest.score.levels.industries = 0;
-    honest.score.flags = ['unknown_vertical'];
-    honest.score.composite = 77.5;
-    honest.score.final_score = 78;
-    honest.score.final_score_without_activation = 78;
-    assert.deepEqual(validateEvent(honest, cfg), []);
+  test('revenue_range must say where its band came from', () => {
+    one((e) => { delete e.cls_all.revenue_range.revenue_source; }, /revenue_range.revenue_source is missing/);
+    one((e) => { delete e.cls_all.revenue_range.revenue_band_used; }, /revenue_range.revenue_band_used is missing/);
+    // Null is a legitimate answer; absent is not.
+    assert.deepEqual(problemsFor((e) => {
+      e.cls_all.revenue_range.revenue_band_used = null;
+      e.cls_all.revenue_range.revenue_source = null;
+    }), []);
   });
 
-  test('a null vertical is the unknown case, not a free pass', () => {
-    one((e) => { e.cls_all.industry_vertical.value = null; },
-      /is not in the rubric, so score\.levels\.industries must be 0/);
+  test('apollo_summary carries the growth figures the Contracting guard reads', () => {
+    one((e) => { delete e.apollo_summary.headcount_6mo_growth; }, /apollo_summary.headcount_6mo_growth is missing/);
+    one((e) => { e.apollo_summary.headcount_6mo_growth = '-0.18'; }, /headcount_6mo_growth has the wrong type/);
+    assert.deepEqual(problemsFor((e) => { e.apollo_summary.headcount_6mo_growth = null; }), []);
   });
 
-  test('the activation state used must be the one the rubric allows', () => {
-    one((e) => { e.score.activation_state_used = 'Stable'; e.score.multiplier = 0.8; e.score.final_score = 74; },
-      /activation_state_used is "Stable", but cls_all\.activation_state gives "Accelerating"/);
-  });
-
-  test('an undated Contracting must be downgraded, and say so', () => {
-    const event = fixture('icp_scored_contracting.json');
-    event.cls_all.activation_state.activation_evidence_dated = false;
-    const problems = validateEvent(event, cfg);
-    assert.ok(problems.some((p) => /activation_state_used is "Contracting", but cls_all\.activation_state gives "Stable"/.test(p)));
-
-    // Downgraded to the default, flagged, arithmetic redone: accepted.
-    const fixed = fixture('icp_scored_contracting.json');
-    fixed.cls_all.activation_state.activation_evidence_dated = false;
-    fixed.score.activation_state_used = cfg.activation_default;
-    fixed.score.multiplier = cfg.activation_multipliers[cfg.activation_default];
-    fixed.score.final_score = roundHalfUp(fixed.score.composite * fixed.score.multiplier);
-    fixed.score.grade = gradeFor(fixed.score.final_score, cfg.thresholds);
-    fixed.score.flags = fixed.score.flags.concat(['contracting_without_dated_evidence']);
-    assert.deepEqual(validateEvent(fixed, cfg), []);
-  });
-
-  test('a state the classifier could not determine falls back to the default', () => {
-    const event = valid();
-    event.cls_all.activation_state.value = null;
-    const problems = validateEvent(event, cfg);
-    assert.ok(problems.some((p) => new RegExp(`gives "${cfg.activation_default}"`).test(p)));
+  test('a confidence outside the three is rejected wherever it appears', () => {
+    one((e) => { e.cls_all.revenue_range.confidence = 'certain'; }, /revenue_range.confidence must be one of/);
+    one((e) => { e.cls_all.industry_vertical.confidence = null; }, /industry_vertical.confidence must be one of/);
   });
 });
 
-describe('the two fields taken on trust are taken on trust', () => {
-  test('confidence_overall is not second-guessed', () => {
-    // n8n never sees the per-source confidences the table weighed, so any of
-    // the three labels is accepted. Saying otherwise would mean inventing a
-    // rule the payload cannot support.
-    for (const label of ['high', 'medium', 'low']) {
-      assert.deepEqual(problemsFor((e) => { e.score.confidence_overall = label; }), []);
-    }
-    one((e) => { e.score.confidence_overall = 'certain'; }, /confidence_overall must be one of/);
-  });
-
-  test('tier2_candidate is not second-guessed either', () => {
-    // The rule reads a revenue NUMBER; v6 sends a band string.
-    for (const value of [true, false]) {
-      assert.deepEqual(problemsFor((e) => { e.score.tier2_candidate = value; }), []);
-    }
-    one((e) => { e.score.tier2_candidate = 'yes'; }, /tier2_candidate must be a boolean/);
-  });
-});
-
-describe('the spliced helpers match the engine they were copied from', () => {
-  test('roundHalfUp agrees with engine/scoring.mjs across the range', () => {
-    for (let i = 0; i <= 100000; i += 1) {
-      const x = i / 1000;
-      assert.equal(roundHalfUp(x), engineRoundHalfUp(x), `roundHalfUp(${x})`);
-    }
-    for (const x of [74.5, 74.49999999999999, 87.65 * 0.8, 92.5 * 0.95, 0, 100]) {
-      assert.equal(roundHalfUp(x), engineRoundHalfUp(x), `roundHalfUp(${x})`);
-    }
-    assert.equal(roundHalfUp(null), null);
-  });
-
-  test('gradeFor agrees with the rubric thresholds at every boundary', () => {
-    const { A, B } = RUBRIC.thresholds;
-    assert.equal(gradeFor(A, RUBRIC.thresholds), 'A');
-    assert.equal(gradeFor(A - 1, RUBRIC.thresholds), 'B');
-    assert.equal(gradeFor(B, RUBRIC.thresholds), 'B');
-    assert.equal(gradeFor(B - 1, RUBRIC.thresholds), 'C');
-    assert.equal(gradeFor(null, RUBRIC.thresholds), null);
-  });
-
+describe('the spliced copy matches the source', () => {
   test('the file has no imports, so it can be spliced into a Code node', () => {
     const source = readFileSync(join(ROOT, 'engine', 'validate_event.mjs'), 'utf8');
     assert.doesNotMatch(source, /^\s*import\s/m);
@@ -288,15 +185,14 @@ describe('the spliced helpers match the engine they were copied from', () => {
 describe('a body that is not an event at all', () => {
   test('is refused without throwing', () => {
     for (const body of [null, undefined, 'a string', 42, []]) {
-      const problems = validateEvent(body, cfg);
-      assert.ok(problems.length > 0, JSON.stringify(body));
+      assert.ok(validateEvent(body, cfg).length > 0, JSON.stringify(body));
     }
   });
 
   test('an empty object names every missing key rather than the first', () => {
     const problems = validateEvent({}, cfg);
-    assert.ok(problems.length >= 10, `expected every gap named, got ${problems.length}`);
+    assert.ok(problems.length >= 9, `expected every gap named, got ${problems.length}`);
     assert.ok(problems.some((p) => /missing "request_id"/.test(p)));
-    assert.ok(problems.some((p) => /missing "score"/.test(p)));
+    assert.ok(problems.some((p) => /missing "cls_all"/.test(p)));
   });
 });

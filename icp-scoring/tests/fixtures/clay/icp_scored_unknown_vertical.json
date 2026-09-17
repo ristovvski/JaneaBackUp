@@ -1,0 +1,99 @@
+{
+  "request_id": "req-icp-0007",
+  "org_id": 10007,
+  "deal_id": 55007,
+  "requested_at": "2026-09-18T10:42:00Z",
+  "identifier_kind": "domain",
+  "identifier_value": "example-horizontal.com",
+  "resolved": {
+    "domain": "example-horizontal.com",
+    "linkedin_url": null,
+    "website": "https://example-horizontal.com"
+  },
+  "cls_all": {
+    "engineering_hiring": {
+      "total_open": 3,
+      "eng_open": 2,
+      "eng_open_60d_plus": 1,
+      "dates_available": true,
+      "leader_titles": [
+        "Head of Platform"
+      ],
+      "eng_titles_with_days": [
+        "Engineer (40d)"
+      ],
+      "eng_open_ratio": 0.08,
+      "eng_headcount": 25
+    },
+    "industry_vertical": {
+      "value": "Horizontal B2B Software",
+      "evidence": [
+        "li_industry: Software Development"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "company_type": {
+      "level": 10,
+      "evidence": [
+        "li_description: B2B SaaS"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "stage_maturity": {
+      "level": 10,
+      "evidence": [
+        "apollo.funding_events[0]: Series B"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "activation_state": {
+      "value": "Accelerating",
+      "evidence": [
+        "apollo.funding_events[0].date: 2026-03-01"
+      ],
+      "activation_evidence_dated": "apollo.funding_events[0].date: 2026-03-01",
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "geography": {
+      "level": 10,
+      "evidence": [
+        "apollo.country: United States"
+      ],
+      "confidence": "high"
+    },
+    "revenue_range": {
+      "level": 10,
+      "revenue_band_used": "$25M–$50M",
+      "revenue_source": "apollo_revenue",
+      "evidence": [
+        "apollo.annual_revenue: 30000000"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "buying_signal": {
+      "level": 7,
+      "evidence": [
+        "eng_open_60d_plus: 1"
+      ]
+    },
+    "conflict_note": null
+  },
+  "apollo_summary": {
+    "employees": 300,
+    "eng_headcount": 25,
+    "country": "United States",
+    "state": "New York",
+    "founded_year": 2017,
+    "last_round_date": "2026-03-01",
+    "headcount_6mo_growth": 0.12,
+    "headcount_12mo_growth": 0.3,
+    "publicly_traded_symbol": null,
+    "owned_by_organization_id": null
+  },
+  "model_version": "v6"
+}

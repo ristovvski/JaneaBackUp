@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+import { activationStateFor } from '../../engine/activation_guard.mjs';
 import { score, RUBRIC } from '../../engine/scoring.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -185,44 +186,38 @@ describe('Python / JavaScript parity', () => {
   test('every clay fixture agrees', (t) => {
     if (!pythonAvailable) return t.skip('python3 unavailable');
     const names = [
-      'icp_scored_A', 'icp_scored_B_stable', 'icp_scored_contracting',
-      'icp_scored_insufficient', 'icp_scored_tier2',
+      'icp_scored_A', 'icp_scored_B_stable', 'icp_scored_contracting_valid',
+      'icp_scored_contracting_unbacked', 'icp_scored_insufficient',
+      'icp_scored_tier2', 'icp_scored_unknown_vertical',
     ];
-    // v6 fixtures carry four classifier objects and six levels; the scorer
-    // takes levels plus per-component confidence either way, so the scoring
-    // input is rebuilt from `score.levels` rather than from seven `components`.
-    // The confidence of a level the table computed is not stated in the event —
-    // there was no classifier to be unsure — so it is read as high here, which
-    // is what "the table computed it" means for confidence_overall.
+    // v6 events carry no score, so the scoring input is rebuilt from cls_all
+    // exactly as the Score node builds it — including the activation guard,
+    // which decides the state before either implementation sees it.
     const inputs = names.map((name) => {
       const event = JSON.parse(readFileSync(join(ROOT, 'tests', 'fixtures', 'clay', `${name}.json`), 'utf8'));
-      const cls = event.cls_all;
-      const levels = event.score.levels;
-      const confidence = {
-        industry_vertical: cls.industry_vertical.confidence,
-        stage_maturity: cls.stage_maturity.confidence,
-        company_type: cls.company_type.confidence,
-        activation_state: cls.activation_state.confidence,
-        geography: 'high', revenue_range: 'high', buying_signal: 'high',
-      };
-      const missing_inputs = {
-        industry_vertical: cls.industry_vertical.missing_inputs,
-        stage_maturity: cls.stage_maturity.missing_inputs,
-        company_type: cls.company_type.missing_inputs,
-        activation_state: cls.activation_state.missing_inputs,
-        geography: [], revenue_range: [], buying_signal: [],
-      };
+      const c = event.cls_all;
+      const guard = activationStateFor(c.activation_state, event.apollo_summary, event.requested_at, 'Stable');
+      const conf = (x) => (x.confidence === undefined ? null : x.confidence);
+      const miss = (x) => x.missing_inputs || [];
       return {
-        industry_vertical: cls.industry_vertical.value,
+        industry_vertical: c.industry_vertical.value,
         levels: {
-          stage_maturity: levels.stage_maturity, company_type: levels.company_type,
-          geography: levels.geography, revenue_range: levels.revenue_range,
-          buying_signal: levels.buying_signal,
+          stage_maturity: c.stage_maturity.level, company_type: c.company_type.level,
+          geography: c.geography.level, revenue_range: c.revenue_range.level,
+          buying_signal: c.buying_signal.level,
         },
-        activation_state: event.score.activation_state_used,
-        activation_evidence_dated_within_months: cls.activation_state.activation_evidence_dated ? 1 : null,
-        confidence,
-        missing_inputs,
+        activation_state: guard.state,
+        activation_evidence_dated_within_months: 0,
+        confidence: {
+          industry_vertical: conf(c.industry_vertical), stage_maturity: conf(c.stage_maturity),
+          company_type: conf(c.company_type), geography: conf(c.geography),
+          revenue_range: conf(c.revenue_range), buying_signal: conf(c.buying_signal),
+        },
+        missing_inputs: {
+          industry_vertical: miss(c.industry_vertical), stage_maturity: miss(c.stage_maturity),
+          company_type: miss(c.company_type), geography: miss(c.geography),
+          revenue_range: miss(c.revenue_range), buying_signal: miss(c.buying_signal),
+        },
         facts_summary: {
           revenue_usd: null,
           headcount_total: event.apollo_summary.employees,

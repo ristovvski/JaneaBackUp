@@ -1,7 +1,8 @@
 {
   "request_id": "req-icp-0002",
-  "org_id": "10002",
-  "deal_id": "55002",
+  "org_id": 10002,
+  "deal_id": 55002,
+  "requested_at": "2026-09-18T10:42:00Z",
   "identifier_kind": "domain",
   "identifier_value": "qcash.io",
   "resolved": {
@@ -10,6 +11,20 @@
     "website": "https://qcash.io"
   },
   "cls_all": {
+    "engineering_hiring": {
+      "total_open": 2,
+      "eng_open": 1,
+      "eng_open_60d_plus": 0,
+      "dates_available": true,
+      "leader_titles": [
+        "VP Engineering"
+      ],
+      "eng_titles_with_days": [
+        "Backend Engineer (9d)"
+      ],
+      "eng_open_ratio": 0.025,
+      "eng_headcount": 40
+    },
     "industry_vertical": {
       "value": "FinTech",
       "evidence": [
@@ -27,10 +42,9 @@
       "missing_inputs": []
     },
     "stage_maturity": {
-      "level": 7,
+      "level": 10,
       "evidence": [
-        "funding_stage: Series A",
-        "eng_roles_open_60d_plus: 2"
+        "apollo.funding_events[0]: Series C"
       ],
       "confidence": "high",
       "missing_inputs": []
@@ -38,48 +52,37 @@
     "activation_state": {
       "value": "Stable",
       "evidence": [
-        "news_last_12mo: []"
+        "no funding event in 24 months",
+        "headcount flat"
       ],
-      "activation_evidence_dated": false,
+      "activation_evidence_dated": null,
       "confidence": "high",
       "missing_inputs": []
     },
-    "conflict_note": null
-  },
-  "jobs": {
-    "eng_open": 1,
-    "eng_open_60d_plus": 2,
-    "has_eng_leader": true,
-    "eng_leader_titles": [
-      "Head of Engineering"
-    ],
-    "eng_open_ratio": 0.025,
-    "eng_headcount": 40,
-    "dates_available": true,
-    "eng_titles": [
-      "Backend Engineer"
-    ],
-    "as_of": "2026-09-09"
-  },
-  "score": {
-    "levels": {
-      "industries": 10,
-      "stage_maturity": 7,
-      "company_type": 10,
-      "geography": 10,
-      "revenue_range": 7,
-      "buying_signal": 3
+    "geography": {
+      "level": 10,
+      "evidence": [
+        "apollo.country: United States"
+      ],
+      "confidence": "high"
     },
-    "composite": 85,
-    "activation_state_used": "Stable",
-    "multiplier": 0.8,
-    "final_score": 68,
-    "final_score_without_activation": 85,
-    "grade": "B",
-    "status": "scored",
-    "confidence_overall": "high",
-    "tier2_candidate": false,
-    "flags": []
+    "revenue_range": {
+      "level": 7,
+      "revenue_band_used": "$10M–$25M",
+      "revenue_source": "apollo_revenue",
+      "evidence": [
+        "apollo.annual_revenue: 14000000"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "buying_signal": {
+      "level": 3,
+      "evidence": [
+        "eng_open: 1"
+      ]
+    },
+    "conflict_note": null
   },
   "apollo_summary": {
     "employees": 130,
@@ -88,8 +91,10 @@
     "state": "Washington",
     "founded_year": 2015,
     "last_round_date": null,
-    "revenue_band_used": "$10M-$25M",
-    "revenue_source": "Apollo"
+    "headcount_6mo_growth": 0.004,
+    "headcount_12mo_growth": 0.01,
+    "publicly_traded_symbol": null,
+    "owned_by_organization_id": null
   },
   "model_version": "v6"
 }
