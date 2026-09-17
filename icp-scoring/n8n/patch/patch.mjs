@@ -41,12 +41,11 @@ const CONFIG_PATH = existsSync(CONFIG_LIVE) ? CONFIG_LIVE : join(NODES, 'CONFIG.
 export const CONFIG_IS_LIVE = CONFIG_PATH === CONFIG_LIVE;
 const CONFIG_STATIC = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
 
-// The four values that must never sit in a file: a Clay webhook URL is an
+// The values that must never sit in a file: a Clay webhook URL is an
 // unguessable endpoint, so it is a secret. Spliced from $env at runtime.
 export const ENV_BINDINGS = {
-  clay_webhook_url: 'ICP_CLAY_WEBHOOK_URL',
+  clay_engine_url: 'ICP_CLAY_ENGINE_URL',
   clay_callback_url: 'ICP_CLAY_CALLBACK_URL',
-  audit_sheet_id: 'ICP_AUDIT_SHEET_ID',
   slack_channel_ops: 'ICP_SLACK_CHANNEL',
 };
 
@@ -313,7 +312,7 @@ export function buildWorkflow() {
   nodes.push({
     parameters: {
       method: 'POST',
-      url: "={{ $('CONFIG').item.json.clay_webhook_url }}",
+      url: "={{ $('CONFIG').item.json.clay_engine_url }}",
       sendBody: true,
       specifyBody: 'json',
       jsonBody: '={{ JSON.stringify($json.body) }}',
@@ -422,23 +421,28 @@ export function buildWorkflow() {
 
   nodes.push(codeNode('BuildAuditRow', [2140, 600], code('BuildAuditRow')));
 
+  // The audit store is an n8n Data Table, not a Google Sheet. It needs no
+  // credential, no OAuth consent and no external service to be reachable for a
+  // row to land, which is three fewer ways for the audit trail — the thing you
+  // reach for when a score is disputed — to be the part that failed.
+  //
+  // `dataTableId` is a resource locator in `name` mode: the Data Table node
+  // resolves a table by name, and a name survives the table being recreated in
+  // a way an id does not. autoMapInputData maps BuildAuditRow's keys onto the
+  // table's columns BY NAME, so the emitted key set must match the column set.
   nodes.push({
     parameters: {
-      resource: 'sheet',
-      operation: 'append',
-      documentId: { __rl: true, value: `={{ ${cfgRef('B')}.item.json.audit_sheet_id }}`, mode: 'id' },
-      sheetName: { __rl: true, value: 'ICP_Audit', mode: 'name' },
-      // autoMapInputData maps the incoming keys onto the sheet's header row by
-      // name, which is why BuildAuditRow emits its keys in §8.4 order.
+      resource: 'row',
+      operation: 'insert',
+      dataTableId: { __rl: true, value: `={{ ${cfgRef('B')}.item.json.audit_data_table }}`, mode: 'name' },
       columns: { mappingMode: 'autoMapInputData', value: {}, matchingColumns: [], schema: [] },
       options: {},
     },
     id: 'Append audit row',
     name: 'Append audit row',
-    type: 'n8n-nodes-base.googleSheets',
-    typeVersion: 4.5,
+    type: 'n8n-nodes-base.dataTable',
+    typeVersion: 1.1,
     position: [2340, 600],
-    credentials: { googleSheetsOAuth2Api: { id: 'gsheets_audit', name: 'gsheets_audit' } },
     ...NO_RETRY,
   });
 

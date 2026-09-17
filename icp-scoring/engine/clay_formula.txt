@@ -1,7 +1,7 @@
 Clay formula column: score_json  (table ICP_Engine, column 8)
 ================================================================
 
-GENERATED from config/rubric_v5.json by scripts/gen_clay_formula.mjs — model v5.
+GENERATED from config/rubric_v6.json by scripts/gen_clay_formula.mjs — model v6.
 Do not hand-edit. Regenerate with `npm run gen:formula`.
 
 tests/contract/clay_parity.test.mjs slices the block between the two 8<
@@ -78,13 +78,13 @@ STEP 3 — the portable body (paste unchanged)
 --------------------------------------------
 
 /* ---8<--- BEGIN PORTABLE BODY (parity-tested; do not edit) --- */
-// Generated from config/rubric_v5.json — model v5. Do not hand-edit.
+// Generated from config/rubric_v6.json — model v6. Do not hand-edit.
 var RUBRIC = {
-  model_version: "v5",
+  model_version: "v6",
   weights: {"industries":15,"stage_maturity":25,"revenue_range":25,"company_type":25,"geography":10,"buying_signal":0},
   levels: [0,3,7,10],
   thresholds: {"A":75,"B":55},
-  multipliers: {"Accelerating":1,"Transitioning":1,"Stable":0.85,"Contracting":0},
+  multipliers: {"Accelerating":1,"Transitioning":0.95,"Stable":0.8,"Contracting":0},
   activation_default: "Stable",
   contracting_max_age_months: 12,
   gating: ["stage_maturity","revenue_range","company_type"],

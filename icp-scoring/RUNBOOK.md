@@ -82,29 +82,43 @@ workflow still carries the placeholder field keys and would write to nothing.
 
 ### 3. Credentials in the DEV n8n project
 
-Five, by name. Values are never in this repo.
+Two, by name. Values are never in this repo.
 
 | Credential | Type | Holds |
 |---|---|---|
 | `pipedrive_main` | Pipedrive API | the API token for org GET/PATCH and note POST |
-| `icp_webhook_basic` | HTTP Basic Auth | the user/password Pipedrive will send to Path A |
-| `clay_webhook_secret` | HTTP Header Auth | name `X-Clay-Secret`, value the shared secret |
 | `slack_ops` | Slack API | posting to the ops channel |
-| `gsheets_audit` | Google Sheets OAuth2 | appending to `ICP_Audit` |
+
+Three credentials that earlier versions needed are gone, and none of them was
+removed to save effort:
+
+- **`icp_webhook_basic`** and **`clay_webhook_secret`** — both webhook nodes run
+  on their unguessable path as the control. A scheme declared with no credential
+  behind it is not weaker auth, it is a dead endpoint: n8n answers every
+  delivery with 500 *"No authentication data defined on node!"* while the
+  subscription upstream still looks healthy. `validate()` now rejects either
+  half of that pair without the other.
+- **`gsheets_audit`** — the audit store is an n8n Data Table, which needs no
+  credential, no OAuth consent and no external service to be reachable. Three
+  fewer ways for the audit trail — the thing you reach for when a score is
+  disputed — to be the part that failed.
 
 ### 4. Environment variables on the n8n instance
 
-CONFIG reads these four at runtime. A Clay webhook URL is an unguessable
+CONFIG reads these three at runtime. A Clay webhook URL is an unguessable
 endpoint — treat it as a secret.
 
 ```
-ICP_CLAY_WEBHOOK_URL    the Clay ICP_Engine webhook source URL
+ICP_CLAY_ENGINE_URL     the Clay ICP table's webhook source URL
 ICP_CLAY_CALLBACK_URL   the Path B webhook URL (what Clay posts back to)
-ICP_AUDIT_SHEET_ID      the ICP_Audit spreadsheet id
 ICP_SLACK_CHANNEL       the channel id, e.g. the id of #gtm-ops-dev
 ```
 
-CONFIG resolves each of the four **three ways, in order**, so the same export
+`ICP_AUDIT_SHEET_ID` is gone: the audit store is an n8n Data Table addressed by
+name, and a table name is neither a secret nor environment-specific, so it is a
+plain constant in CONFIG (`audit_data_table`).
+
+CONFIG resolves each of the three **three ways, in order**, so the same export
 works on Cloud and self-hosted without being told which it is:
 
 1. **`$vars.NAME`** — n8n Variables. Preferred: changing a value is a UI edit,
@@ -176,8 +190,8 @@ Then, in the n8n UI:
 
 Confirm on import:
 
-- [ ] the Google Sheets node's column mapping is `autoMapInputData` and the
-      `ICP_Audit` header row matches `BuildAuditRow`'s 31 columns, in order
+- [ ] the Data Table node's column mapping is `autoMapInputData` and the
+      `icp_audit` table's columns match `BuildAuditRow`'s 31, by name
 - [ ] every node shows a green credential, none shows "credential not found"
 - [ ] both webhook nodes show their authentication set
 - [ ] `settings.errorWorkflow` resolves to the real WF-ERR (the export carries
@@ -200,18 +214,33 @@ This complements rather than replaces SECURITY.md's own gate
 every `.env` value over 12 characters. Run that one too before any commit that
 touches this subtree — it is the authority, because it needs no guessing.
 
-### 6. Create the audit sheet
+### 6. Create the `icp_audit` Data Table
 
-A spreadsheet named `ICP_Audit` with a tab `ICP_Audit`, whose header row is
-exactly `BuildAuditRow`'s columns in order:
+```bash
+npm run audit:table      # prints the 31 columns and their types, ready to type in
+```
 
-```
-ts, request_id, execution_id, trigger, deal_id, org_id, identifier_kind,
-identifier_value, model_version, industry_vertical, industry_level, stage_level,
-type_level, geo_level, revenue_level, buying_level, activation_state, multiplier,
-composite, final, final_without_activation, grade, status, confidence_overall,
-tier2_candidate, flags, missing_inputs, evidence_json, patch_written, note_id, error
-```
+n8n → **Data tables** → **Create data table**, named exactly `icp_audit`, then
+add the columns the command prints, with the types it gives. Names must match
+exactly: the Data Table node maps input keys onto columns **by name**, so a
+mismatched name is dropped silently rather than failing the write.
+
+This one step is manual, and it is the only one. n8n's public API has no
+data-tables endpoint (`GET /api/v1/data-tables` → 404) and the internal REST API
+wants a browser session, so the only component on the instance that can reach
+data tables with an API key is a workflow node — and on this build that node has
+the `row` resource but not `table`:
+
+| probe, run in a throwaway webhook workflow | result |
+|---|---|
+| `resource=row, operation=get` | `Could not find the data table: 'icp_audit'` |
+| `resource=row, operation=insert` | reached the column mapper |
+| `resource=table, operation=list` | `Could not get parameter` |
+| `resource=table, operation=create` | `Could not get parameter` |
+
+The row half — the half Path B actually uses — works. When the instance picks up
+a build whose Data Table node carries the `table` resource, the same throwaway
+trick creates the table from `config/icp_audit_table.json` with no UI at all.
 
 Order matters: `autoMapInputData` matches by header name, and a column present
 in the node but missing from the sheet is silently dropped.
@@ -290,7 +319,7 @@ Every artefact carries `request_id`. One search finds the whole story.
 ```
 1. Slack alert            -> execution_id and request_id
 2. n8n execution list     -> filter by execution_id, open it, read the node outputs
-3. the ICP_Audit sheet    -> filter by request_id: one row per Path B run
+3. the icp_audit table    -> filter by request_id: one row per Path B run
 4. the Pipedrive note     -> the footer carries "request_id <id>"
 5. the Clay row           -> request_id is column 1
 ```
@@ -376,10 +405,10 @@ two n8n instances hold the same webhook path.
 
 ## Changing a scoring number
 
-Every number lives in `config/rubric_v5.json`.
+Every number lives in `config/rubric_v6.json`.
 
 ```bash
-$EDITOR config/rubric_v5.json
+$EDITOR config/rubric_v6.json
 npm run gen:prompts && npm run gen:formula && npm run gen:config && npm run gen:nodes
 node n8n/patch/patch.mjs
 npm test

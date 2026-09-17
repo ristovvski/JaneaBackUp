@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (...p) => JSON.parse(readFileSync(join(ROOT, ...p), 'utf8'));
 
-const RUBRIC = read('config', 'rubric_v5.json');
+const RUBRIC = read('config', 'rubric_v6.json');
 const CANONICAL = read('engine', 'schemas', 'classifier_output.schema.json');
 
 export const LEVELS = RUBRIC.levels;
@@ -114,5 +114,5 @@ if (isMain) {
     writeFileSync(file, `${JSON.stringify(strictSchemaFor(component), null, 2)}\n`);
     console.log(`engine/schemas/openai/${component}.strict.json`);
   }
-  console.log(`${COMPONENTS.length} strict schemas generated from config/rubric_v5.json`);
+  console.log(`${COMPONENTS.length} strict schemas generated from config/rubric_v6.json`);
 }

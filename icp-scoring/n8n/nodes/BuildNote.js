@@ -13,7 +13,13 @@
 //   this one node and one test.
 //
 // Level TEXT comes from CONFIG.component_scales, which is generated from
-// config/rubric_v5.json. No rubric prose is typed into this node.
+// config/rubric_v6.json. No rubric prose is typed into this node.
+//
+// v6: geography, revenue_range and buying_signal carry no evidence, because
+// the table computes them rather than a classifier deciding them. Their lines
+// still appear — a rep reading the note needs to see every component that
+// moved the score — they simply have no evidence tail. The conflict note the
+// table emits when two sources disagreed gets a line of its own.
 //
 // The character budget is enforced by trimming in a fixed order — evidence
 // first, then level text — so the output is deterministic rather than
@@ -39,8 +45,9 @@ const parsed = $('ParseScored').item.json;
 
 const score = parsed.score;
 const components = parsed.components;
-const facts = parsed.facts_summary || {};
-const levels = score.levels_used;
+const apollo = parsed.apollo_summary || {};
+const jobs = parsed.jobs || {};
+const levels = score.levels;
 
 const MAX = cfg.note_max_chars || 1500;
 const DASH = '—'; // em dash
@@ -74,7 +81,7 @@ const verticalTier = vertical === null || vertical === undefined
 const rows = [
   {
     name: 'Industry',
-    level: score.industry_level,
+    level: levels.industries,
     // The industry line carries the vertical and its tier rather than a level
     // definition: "FinTech (Anchor)" is what a rep can act on.
     text: vertical === null || vertical === undefined
@@ -128,17 +135,36 @@ if (score.activation_state_used === 'Contracting') {
                    `${ARROW} ${withoutGrade}`;
 }
 
+const show = (v) => (v === null || v === undefined ? 'n/a' : v);
+const engHeadcount = apollo.eng_headcount === null || apollo.eng_headcount === undefined
+  ? jobs.eng_headcount
+  : apollo.eng_headcount;
+
 const ref = [];
-ref.push(`HC ${facts.headcount_total === null || facts.headcount_total === undefined ? 'n/a' : facts.headcount_total}`);
-ref.push(`eng HC ${facts.headcount_eng === null || facts.headcount_eng === undefined ? 'n/a' : facts.headcount_eng}`);
-ref.push(`buying signal ${score.buying_signal_level === null || score.buying_signal_level === undefined ? 'n/a' : score.buying_signal_level}`);
+ref.push(`HC ${show(apollo.employees)}`);
+ref.push(`eng HC ${show(engHeadcount)}`);
+ref.push(`buying signal ${show(levels.buying_signal)}`);
+// Open engineering roles are the single most-asked-about number behind stage
+// and buying signal, and v6 is the first version that sends them. A null is
+// printed as n/a rather than 0: "the jobs provider returned nothing" and "this
+// company is hiring nobody" are opposite facts and must not read the same.
+if (jobs.eng_open !== undefined) ref.push(`eng roles open ${show(jobs.eng_open)}`);
+if (apollo.revenue_band_used) ref.push(`revenue ${apollo.revenue_band_used}`);
 if (score.tier2_candidate) ref.push('Tier 2 candidate');
 const referenceLine = `Reference: ${ref.join(' · ')}`;
+
+// The table reports a disagreement between two sources here rather than
+// resolving it silently. It never touches the score; it explains it.
+const conflictLine = parsed.conflict_note ? `Conflict: ${parsed.conflict_note}` : null;
 
 // Missing / low confidence. Mandatory and non-empty on insufficient_data.
 const missingBits = [];
 for (const component of Object.keys(components)) {
   const c = components[component];
+  // A component the table computed carries no confidence label at all. That is
+  // not "low" — there was no classifier to be unsure — so it contributes
+  // nothing to this line.
+  if (c.computed_by_table) continue;
   const missing = c.missing_inputs || [];
   const parts = [];
   if (missing.length > 0) parts.push(missing.join(', '));
@@ -146,6 +172,21 @@ for (const component of Object.keys(components)) {
   else if (c.confidence === 'medium') parts.push('medium confidence');
   if (parts.length > 0) missingBits.push(`${component} (${parts.join('; ')})`);
 }
+// The component that made this insufficient_data may have no classifier object
+// at all in v6 — revenue_range is computed by the table — so the reason would
+// otherwise be invisible in the very note that says "Insufficient data". The
+// table names them in a flag; this reads them back out.
+for (const flag of score.flags || []) {
+  const match = /^insufficient:(.+)$/.exec(flag);
+  if (!match) continue;
+  for (const name of match[1].split(',')) {
+    const component = name.trim();
+    if (component === '') continue;
+    if (missingBits.some((bit) => bit.indexOf(`${component} (`) === 0)) continue;
+    missingBits.push(`${component} (insufficient)`);
+  }
+}
+
 let missingLine;
 if (missingBits.length > 0) {
   missingLine = `Missing / low confidence: ${missingBits.join(' · ')}`;
@@ -171,6 +212,7 @@ const assemble = (evidenceCount, textLimit) => [
   activationLine,
   compositeLine,
   referenceLine,
+  ...(conflictLine === null ? [] : [conflictLine]),
   missingLine,
   footer,
 ].join('\n');

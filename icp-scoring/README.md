@@ -15,7 +15,7 @@ Pipedrive deal.create ──▶ n8n WF-ICP-Score (Path A) ──▶ Clay ICP_Eng
 
 Architecture: `ICP_Scoring_Architecture_v2_1.md`. Build task: §-numbered
 references throughout this repo point at it. Rubric numbers: only ever
-`config/rubric_v5.json`.
+`config/rubric_v6.json`.
 
 ---
 
@@ -36,7 +36,7 @@ or the Anthropic API.
 
 | Path | What it is |
 |---|---|
-| `config/rubric_v5.json` | **The single source of truth for every scoring number.** Weights, thresholds, level definitions, the 17 verticals, multipliers, windows. |
+| `config/rubric_v6.json` | **The single source of truth for every scoring number.** Weights, thresholds, level definitions, the 17 verticals, multipliers, windows. |
 | `config/pipedrive_fields.json` | Field keys and enum option ids. Written by `pipedrive_create_fields`. |
 | `engine/scoring.mjs` | The deterministic scorer. Pure. S1–S12. |
 | `engine/normalize.mjs` | Domain / LinkedIn / company-name normalization and identifier resolution. |
@@ -57,7 +57,7 @@ or the Anthropic API.
 
 ## Generated files — do not hand-edit
 
-Four artefacts are derived from `config/rubric_v5.json` (and, for CONFIG, from
+Four artefacts are derived from `config/rubric_v6.json` (and, for CONFIG, from
 `config/pipedrive_fields.json`). A contract or static test fails if any of them
 is stale, so a forgotten regeneration is caught by `npm test` rather than by a
 wrong grade in Pipedrive.
@@ -70,7 +70,7 @@ wrong grade in Pipedrive.
 | `npm run gen:nodes`   | `n8n/nodes/BuildClayRequest.js`, `n8n/nodes/ParseScored.js` |
 | `node n8n/patch/patch.mjs` | `n8n/workflows/WF-ICP-Score.dev.json`, `api-payload.json` |
 
-**Changing a scoring number is one edit** to `config/rubric_v5.json`, then:
+**Changing a scoring number is one edit** to `config/rubric_v6.json`, then:
 
 ```bash
 npm run gen:prompts && npm run gen:formula && npm run gen:config && npm run gen:nodes

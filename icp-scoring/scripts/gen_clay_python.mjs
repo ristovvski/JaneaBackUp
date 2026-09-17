@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// scripts/gen_clay_python.mjs — write engine/clay_score.py from config/rubric_v5.json.
+// scripts/gen_clay_python.mjs — write engine/clay_score.py from config/rubric_v6.json.
 //
 // WHY THIS EXISTS, AND WHAT IT COSTS
 //
@@ -10,7 +10,7 @@
 // it is flagged in REPORT.md rather than papered over.
 //
 // The mitigation is the same discipline applied twice: this Python is
-// GENERATED from the same config/rubric_v5.json, so no number is retyped, and
+// GENERATED from the same config/rubric_v6.json, so no number is retyped, and
 // tests/contract/python_parity.test.mjs runs BOTH implementations over the same
 // inputs and deep-compares. Behaviour is identical and proven; the bytes are
 // not, and saying otherwise would be a lie.
@@ -22,7 +22,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const RUBRIC = JSON.parse(readFileSync(join(ROOT, 'config', 'rubric_v5.json'), 'utf8'));
+const RUBRIC = JSON.parse(readFileSync(join(ROOT, 'config', 'rubric_v6.json'), 'utf8'));
 
 const py = (v) => JSON.stringify(v)
   .replace(/\btrue\b/g, 'True').replace(/\bfalse\b/g, 'False').replace(/\bnull\b/g, 'None');
@@ -36,7 +36,7 @@ for (const [name, row] of Object.entries(RUBRIC.industry_verticals)) {
 
 const file = `# engine/clay_score.py
 #
-# GENERATED from config/rubric_v5.json by scripts/gen_clay_python.mjs — model ${RUBRIC.model_version}.
+# GENERATED from config/rubric_v6.json by scripts/gen_clay_python.mjs — model ${RUBRIC.model_version}.
 # Do not hand-edit. Regenerate with \`npm run gen:python\`.
 #
 # This is the Clay Workflow "Score" code node. Clay code nodes run Python, so

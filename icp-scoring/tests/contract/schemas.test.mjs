@@ -15,7 +15,7 @@ import Ajv from 'ajv';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (...p) => JSON.parse(readFileSync(join(ROOT, ...p), 'utf8'));
 
-const RUBRIC = read('config', 'rubric_v5.json');
+const RUBRIC = read('config', 'rubric_v6.json');
 const eventSchema = read('engine', 'schemas', 'icp_scored_event.schema.json');
 const classifierSchema = read('engine', 'schemas', 'classifier_output.schema.json');
 const factsSchema = read('engine', 'schemas', 'enrichment_facts.schema.json');
@@ -56,7 +56,7 @@ describe('icp_scored_event.schema.json', () => {
     const paths = (validateEvent.errors || []).map((e) => e.instancePath);
     const messages = errs(validateEvent);
     assert.ok(messages.includes('additionalProperties') || paths.includes(''), 'extra top-level key');
-    assert.ok(paths.some((p) => p.startsWith('/components')), 'missing required component');
+    assert.ok(paths.some((p) => p.startsWith('/jobs')), 'missing required jobs key');
     assert.ok(paths.some((p) => p.startsWith('/score')), 'invalid score block');
   });
 
@@ -106,11 +106,15 @@ describe('icp_scored_event.schema.json', () => {
   });
 
   test('a level outside 0/3/7/10 is rejected wherever it appears', () => {
-    for (const path of ['industry_level', 'levels_used']) {
+    for (const key of ['industries', 'geography', 'stage_maturity']) {
       const mutated = read('tests', 'fixtures', 'clay', 'icp_scored_A.json');
-      if (path === 'industry_level') mutated.score.industry_level = 5;
-      else mutated.score.levels_used.geography = 5;
-      assert.equal(validateEvent(mutated), false, path);
+      mutated.score.levels[key] = 5;
+      assert.equal(validateEvent(mutated), false, `score.levels.${key}`);
+    }
+    for (const component of ['company_type', 'stage_maturity']) {
+      const mutated = read('tests', 'fixtures', 'clay', 'icp_scored_A.json');
+      mutated.cls_all[component].level = 5;
+      assert.equal(validateEvent(mutated), false, `cls_all.${component}.level`);
     }
   });
 });
@@ -214,13 +218,58 @@ describe('classifier_output.schema.json — the per-component discriminator', ()
     }
   });
 
-  test('every component of every clay fixture validates as a classifier output', () => {
+  test('every cls_all entry of every clay fixture validates as a classifier output', () => {
+    // v6 keeps four classifiers; geography, revenue_range and buying_signal are
+    // levelled by the table and have no classifier object to validate. The
+    // levelled two carry `level` where the classifier schema says `value`, so
+    // the key is renamed for the check rather than the schema being loosened.
+    // activation_state is deliberately absent. The classifier contract says the
+    // evidence age in MONTHS; the v6 event carries the boolean the rubric
+    // actually turns that into (`months <= contracting_max_age_months`). Two
+    // contracts at two points, with the table doing the conversion — checked
+    // one test down rather than by loosening either schema.
+    const VALUE_KEY = { industry_vertical: 'value', company_type: 'level', stage_maturity: 'level' };
     for (const file of clayFiles.filter((f) => !f.includes('malformed'))) {
       const event = read('tests', 'fixtures', 'clay', file);
-      for (const [component, payload] of Object.entries(event.components)) {
-        const ok = validateClassifier({ component, ...payload });
+      for (const [component, key] of Object.entries(VALUE_KEY)) {
+        const payload = event.cls_all[component];
+        const ok = validateClassifier({
+          component,
+          value: payload[key],
+          evidence: payload.evidence,
+          confidence: payload.confidence,
+          missing_inputs: payload.missing_inputs,
+        });
         assert.ok(ok, `${file} / ${component}: ${errs(validateClassifier)}`);
       }
+    }
+  });
+
+  test('activation_evidence_dated is the classifier month count run through the rubric', () => {
+    const rubric = read('config', 'rubric_v6.json');
+    const maxAge = rubric.activation_contracting_evidence_max_age_months;
+
+    // The one fixture that claims Contracting dates its evidence 3 months back,
+    // inside the window, so the boolean must be true and the multiplier must be
+    // Contracting's rather than the downgrade default.
+    const contracting = read('tests', 'fixtures', 'clay', 'icp_scored_contracting.json');
+    assert.ok(3 <= maxAge);
+    assert.equal(contracting.cls_all.activation_state.value, 'Contracting');
+    assert.equal(contracting.cls_all.activation_state.activation_evidence_dated, true);
+    assert.equal(contracting.score.activation_state_used, 'Contracting');
+    assert.equal(contracting.score.multiplier, rubric.activation_multipliers.Contracting);
+
+    // The flag reports whether the activation evidence is dated at all, not
+    // whether the state is Contracting: a dated Accelerating call is still
+    // dated. So it must be a boolean everywhere, and true wherever the case
+    // gives its evidence a date inside the window.
+    for (const file of clayFiles.filter((f) => !f.includes('malformed'))) {
+      const event = read('tests', 'fixtures', 'clay', file);
+      const flag = event.cls_all.activation_state.activation_evidence_dated;
+      assert.equal(typeof flag, 'boolean', `${file}: dating flag must be a boolean, never null`);
+      const hasDatedEvidence = event.cls_all.activation_state.evidence
+        .some((e) => /\d{4}-\d{2}-\d{2}/.test(e));
+      if (flag) assert.ok(hasDatedEvidence, `${file}: flag is true but no evidence string carries a date`);
     }
   });
 });
@@ -292,7 +341,7 @@ describe('enrichment_facts.schema.json', () => {
   });
 });
 
-describe('rubric_v5.json is internally consistent (§9.2)', () => {
+describe('rubric_v6.json is internally consistent (§9.2)', () => {
   test('weights sum to 100', () => {
     assert.equal(Object.values(RUBRIC.weights).reduce((a, b) => a + b, 0), 100);
   });
@@ -381,5 +430,40 @@ describe('rubric_v5.json is internally consistent (§9.2)', () => {
 
   test('the geography deviation from the signed rubric is recorded in config', () => {
     assert.match(RUBRIC.geography_rule_deviation, /NEEDS_DECISION #3/);
+  });
+});
+
+describe('the rubric in force is v6, and nothing still reads v5', () => {
+  test('config/rubric_v6.json is what the engine loads', () => {
+    const rubric = read('config', 'rubric_v6.json');
+    assert.equal(rubric.model_version, 'v6');
+    assert.deepEqual(rubric.activation_multipliers, {
+      Accelerating: 1, Transitioning: 0.95, Stable: 0.8, Contracting: 0,
+    });
+    assert.deepEqual(rubric.unknown_vertical_rule, { level: 0, flag: 'unknown_vertical', confidence: 'low' });
+  });
+
+  test('config/rubric_v5.json is kept but marked superseded, and nothing reads it', () => {
+    const v5 = read('config', 'rubric_v5.json');
+    assert.equal(v5.superseded_by, 'rubric_v6.json');
+    assert.equal(v5.model_version, 'v5');
+
+    // A rubric no code reads is history; a rubric some code still reads is a
+    // second source of truth. Only the v5 event schema, which exists to
+    // validate v5 captures, may still say v5.
+    const roots = ['engine', 'scripts', 'clay', 'n8n', 'config'];
+    const offenders = [];
+    const walk = (dir) => {
+      for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+        const rel = join(dir, entry.name);
+        if (entry.isDirectory()) { walk(rel); continue; }
+        if (!/\.(mjs|js|py|json)$/.test(entry.name)) continue;
+        if (rel.includes(join('schemas', 'v5'))) continue;
+        if (entry.name === 'rubric_v5.json') continue;
+        if (readFileSync(join(ROOT, rel), 'utf8').includes('rubric_v5.json')) offenders.push(rel);
+      }
+    };
+    for (const root of roots) walk(root);
+    assert.deepEqual(offenders, [], `still reading the superseded rubric:\n  ${offenders.join('\n  ')}`);
   });
 });

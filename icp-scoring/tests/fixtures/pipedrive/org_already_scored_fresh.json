@@ -1,11 +1,11 @@
 {
   "_fixture": "org_already_scored_fresh",
-  "_note": "Scored 10 days ago on model v5. The IdempotencyGate must SKIP this org: inside the 180-day window and on the current model.",
+  "_note": "Scored 10 days ago on model v6. The IdempotencyGate must SKIP this org: inside the 180-day window and on the current model.",
   "_icp_symbolic": {
     "icp_calculated": "ICP A",
     "icp_score": 93,
     "icp_scored_at": "@days_ago:10",
-    "icp_model_version": "v5"
+    "icp_model_version": "v6"
   },
   "_icp_symbolic_help": "The harness (tests/static/harness.mjs) expands these symbolic keys into hashed custom_fields using CONFIG, so the fixture stays readable and survives create_fields replacing the placeholder keys with real ones. `@days_ago:N` is resolved against CONFIG.now_iso at test time, so 'fresh' and 'stale' cannot rot into each other as the calendar moves.",
   "success": true,

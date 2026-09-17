@@ -15,6 +15,9 @@
 //      what the org already holds. Same event, same values -> {} -> the IF
 //      gate skips the PATCH entirely, and Pipedrive sees no write at all.
 //
+//   3. Fill, never correct. website and linkedin are written only when the
+//      record has none. See the block near the bottom.
+//
 // On ICP Scored At: it is included when the date differs, which means a
 // re-score on a later day updates it (correct — it is what the 180-day gate
 // reads) while a second run on the same day writes nothing (also correct).
@@ -57,6 +60,7 @@ const parsed = $('ParseScored').item.json;
 const fetched = $input.first().json;
 const org = fetched.data || fetched;
 const existing = org.custom_fields || {};
+const resolved = parsed.resolved || {};
 
 const score = parsed.score;
 
@@ -141,7 +145,55 @@ for (const forbidden of cfg.fields_never_write || []) {
   }
 }
 
-const patch = changed.length === 0 ? {} : { custom_fields: customFields };
+// ---------------------------------------------------------------------------
+// Fill-if-empty: website and LinkedIn URL from what the table resolved.
+//
+// A name-only org is the case this exists for. Path A sends the name, the
+// table finds the company, and `resolved` comes back holding the domain and
+// the LinkedIn URL that scoring actually used — which is exactly what the CRM
+// record was missing and what makes the NEXT run a domain lookup instead of a
+// name search.
+//
+// FILL, never correct. A value already on the record was put there by a human
+// or by an earlier integration, and this workflow's job is scoring, not
+// deciding that someone else's URL is wrong. An org with a website keeps it,
+// even if the table resolved a different one — that disagreement belongs in
+// the note, not in a silent overwrite.
+//
+// These are standard organization fields, so they sit at the TOP level of the
+// v2 patch body, not under custom_fields.
+// ---------------------------------------------------------------------------
+const isBlank = (v) => v === null || v === undefined || String(v).trim() === '';
+
+const standard = {};
+const filled = [];
+const FILL_IF_EMPTY = [
+  // Pipedrive's own key <- the resolved key that feeds it. The Pipedrive
+  // organization field is `linkedin` ("LinkedIn profile"), NOT `linkedin_url`;
+  // both are short standard keys on this account, which is why they go at the
+  // top level of the v2 body. `website` takes the table's website first and
+  // falls back to the domain, which a lookup can always produce.
+  { field: 'website', from: ['website', 'domain'] },
+  { field: 'linkedin', from: ['linkedin_url'] },
+];
+
+for (const rule of FILL_IF_EMPTY) {
+  if (!isBlank(org[rule.field])) continue;
+  let value = null;
+  for (const key of rule.from) {
+    if (!isBlank(resolved[key])) { value = String(resolved[key]).trim(); break; }
+  }
+  if (value === null) continue;
+  // A bare domain is not a URL. Pipedrive stores the string as given, and a
+  // rep clicking "akuvo.com" in the UI should land on the site.
+  if (rule.field === 'website' && !/^https?:\/\//i.test(value)) value = `https://${value}`;
+  standard[rule.field] = value;
+  filled.push(rule.field);
+}
+
+const patch = changed.length === 0 && filled.length === 0
+  ? {}
+  : Object.assign({}, standard, changed.length === 0 ? {} : { custom_fields: customFields });
 
 return [{
   json: {
@@ -149,9 +201,10 @@ return [{
     org_id: parsed.org_id,
     deal_id: parsed.deal_id,
     patch,
-    patch_is_empty: changed.length === 0,
+    patch_is_empty: changed.length === 0 && filled.length === 0,
     changed_fields: changed,
     unchanged_fields: unchanged,
+    filled_fields: filled,
     target_label: targetLabel,
     target_option_id: optionId,
     scored_at: scoredAt,

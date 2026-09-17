@@ -1,14 +1,15 @@
 {
-  "event": "icp.scored",
-  "event_id": "clay-evt-a1b2c3d4e5f6",
   "request_id": "req-icp-0001",
-  "emitted_at": "2026-09-09T10:15:00Z",
-  "model_version": "v5",
   "org_id": "10001",
   "deal_id": "55001",
   "identifier_kind": "domain",
   "identifier_value": "akuvo.com",
-  "components": {
+  "resolved": {
+    "domain": "akuvo.com",
+    "linkedin_url": "https://www.linkedin.com/company/akuvo",
+    "website": "https://akuvo.com"
+  },
+  "cls_all": {
     "industry_vertical": {
       "value": "FinTech",
       "evidence": [
@@ -18,39 +19,21 @@
       "confidence": "high",
       "missing_inputs": []
     },
-    "stage_maturity": {
-      "value": 10,
-      "evidence": [
-        "funding_stage: Series B",
-        "eng_roles_open_60d_plus: 4"
-      ],
-      "confidence": "high",
-      "missing_inputs": []
-    },
     "company_type": {
-      "value": 10,
+      "level": 10,
       "evidence": [
         "li_description: SaaS lending origination platform"
       ],
       "confidence": "high",
       "missing_inputs": []
     },
-    "geography": {
-      "value": 10,
+    "stage_maturity": {
+      "level": 10,
       "evidence": [
-        "hq_country: United States",
-        "hq_state: Colorado"
+        "funding_stage: Series B",
+        "eng_roles_open_60d_plus: 4"
       ],
       "confidence": "high",
-      "missing_inputs": []
-    },
-    "revenue_range": {
-      "value": 7,
-      "evidence": [
-        "revenue_estimate_usd: 18000000",
-        "revenue_source: Apollo"
-      ],
-      "confidence": "medium",
       "missing_inputs": []
     },
     "activation_state": {
@@ -59,33 +42,37 @@
         "last_round_date: 2026-04-02",
         "open_eng_roles_count: 11"
       ],
-      "confidence": "high",
-      "missing_inputs": [],
-      "evidence_dated_within_months": 5
-    },
-    "buying_signal": {
-      "value": 7,
-      "evidence": [
-        "senior_eng_roles: 2",
-        "last_round_usd: 21000000"
-      ],
+      "activation_evidence_dated": true,
       "confidence": "high",
       "missing_inputs": []
-    }
+    },
+    "conflict_note": null
+  },
+  "jobs": {
+    "eng_open": 11,
+    "eng_open_60d_plus": 4,
+    "has_eng_leader": true,
+    "eng_leader_titles": [
+      "VP Engineering"
+    ],
+    "eng_open_ratio": 0.18,
+    "eng_headcount": 62,
+    "dates_available": true,
+    "eng_titles": [
+      "Senior Backend Engineer",
+      "Platform Engineer"
+    ],
+    "as_of": "2026-09-09"
   },
   "score": {
-    "model_version": "v5",
-    "industry_level": 10,
-    "industry_tier": "Anchor",
-    "levels_used": {
-      "industry": 10,
+    "levels": {
+      "industries": 10,
       "stage_maturity": 10,
       "company_type": 10,
       "geography": 10,
       "revenue_range": 7,
       "buying_signal": 7
     },
-    "buying_signal_level": 7,
     "composite": 92.5,
     "activation_state_used": "Accelerating",
     "multiplier": 1,
@@ -97,11 +84,15 @@
     "tier2_candidate": false,
     "flags": []
   },
-  "facts_summary": {
-    "revenue_usd": 18000000,
-    "headcount_total": 190,
-    "headcount_eng": 62
+  "apollo_summary": {
+    "employees": 190,
+    "eng_headcount": 62,
+    "country": "United States",
+    "state": "Colorado",
+    "founded_year": 2018,
+    "last_round_date": "2026-04-02",
+    "revenue_band_used": "$10M-$25M",
+    "revenue_source": "Apollo"
   },
-  "clay_table": "ICP_Engine",
-  "clay_row_url": null
+  "model_version": "v6"
 }

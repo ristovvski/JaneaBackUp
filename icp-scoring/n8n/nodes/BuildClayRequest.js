@@ -368,7 +368,7 @@ return [{
     identifier_value: identifier.value,
     identifier_confidence: identifier.confidence,
     identifier_warnings: identifier.warnings,
-    clay_url: cfg.clay_webhook_url,
+    clay_url: cfg.clay_engine_url,
     body,
   },
 }];

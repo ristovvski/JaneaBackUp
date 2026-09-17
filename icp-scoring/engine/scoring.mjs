@@ -2,14 +2,14 @@
 //
 // Pure: no network, no CRM, no clock. The rubric JSON is read once at module
 // load (the only file read) so that every scoring number has exactly one
-// source of truth: config/rubric_v5.json.
+// source of truth: config/rubric_v6.json.
 //
 // This same arithmetic is expressed three more times, all generated from or
 // tested against this file:
 //   - engine/clay_formula.txt   (Clay formula column; scripts/gen_clay_formula.mjs)
 //   - n8n/nodes/ParseScored.js  (independent recompute + drift guard)
 //   - tests/unit/scoring.test.mjs
-// If you change a number, change config/rubric_v5.json and nothing else.
+// If you change a number, change config/rubric_v6.json and nothing else.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -17,7 +17,7 @@ import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const RUBRIC = JSON.parse(
-  readFileSync(join(HERE, '..', 'config', 'rubric_v5.json'), 'utf8')
+  readFileSync(join(HERE, '..', 'config', 'rubric_v6.json'), 'utf8')
 );
 
 // ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ export const RUBRIC = JSON.parse(
 const WEIGHT_SUM = Object.values(RUBRIC.weights).reduce((a, b) => a + b, 0);
 if (WEIGHT_SUM !== 100) {
   throw new Error(
-    `rubric_v5.json: weights must sum to 100, got ${WEIGHT_SUM} ` +
+    `rubric_v6.json: weights must sum to 100, got ${WEIGHT_SUM} ` +
     `(${JSON.stringify(RUBRIC.weights)})`
   );
 }
@@ -45,7 +45,7 @@ const WEIGHT_KEY_TO_LEVEL_KEY = {
 
 for (const key of Object.keys(RUBRIC.weights)) {
   if (!(key in WEIGHT_KEY_TO_LEVEL_KEY)) {
-    throw new Error(`rubric_v5.json: unmapped weight key "${key}"`);
+    throw new Error(`rubric_v6.json: unmapped weight key "${key}"`);
   }
 }
 
@@ -85,7 +85,7 @@ export function industryLevelFor(vertical) {
   const level = RUBRIC.industry_vertical_map[row.tier];
   if (level === undefined) {
     throw new Error(
-      `rubric_v5.json: vertical "${vertical}" has tier "${row.tier}" ` +
+      `rubric_v6.json: vertical "${vertical}" has tier "${row.tier}" ` +
       `which is absent from industry_vertical_map`
     );
   }

@@ -94,7 +94,7 @@ describe('engine/clay_score.py is current', () => {
   test('the file exists and is generated from the rubric', () => {
     assert.ok(existsSync(PY), 'run `npm run gen:python`');
     const src = readFileSync(PY, 'utf8');
-    assert.ok(src.includes('GENERATED from config/rubric_v5.json'));
+    assert.ok(src.includes('GENERATED from config/rubric_v6.json'));
     assert.ok(src.includes(JSON.stringify(RUBRIC.weights)), 'weights inlined from config');
     assert.ok(src.includes(JSON.stringify(RUBRIC.thresholds)), 'thresholds inlined from config');
   });
@@ -188,21 +188,46 @@ describe('Python / JavaScript parity', () => {
       'icp_scored_A', 'icp_scored_B_stable', 'icp_scored_contracting',
       'icp_scored_insufficient', 'icp_scored_tier2',
     ];
+    // v6 fixtures carry four classifier objects and six levels; the scorer
+    // takes levels plus per-component confidence either way, so the scoring
+    // input is rebuilt from `score.levels` rather than from seven `components`.
+    // The confidence of a level the table computed is not stated in the event —
+    // there was no classifier to be unsure — so it is read as high here, which
+    // is what "the table computed it" means for confidence_overall.
     const inputs = names.map((name) => {
       const event = JSON.parse(readFileSync(join(ROOT, 'tests', 'fixtures', 'clay', `${name}.json`), 'utf8'));
-      const c = event.components;
+      const cls = event.cls_all;
+      const levels = event.score.levels;
+      const confidence = {
+        industry_vertical: cls.industry_vertical.confidence,
+        stage_maturity: cls.stage_maturity.confidence,
+        company_type: cls.company_type.confidence,
+        activation_state: cls.activation_state.confidence,
+        geography: 'high', revenue_range: 'high', buying_signal: 'high',
+      };
+      const missing_inputs = {
+        industry_vertical: cls.industry_vertical.missing_inputs,
+        stage_maturity: cls.stage_maturity.missing_inputs,
+        company_type: cls.company_type.missing_inputs,
+        activation_state: cls.activation_state.missing_inputs,
+        geography: [], revenue_range: [], buying_signal: [],
+      };
       return {
-        industry_vertical: c.industry_vertical.value,
+        industry_vertical: cls.industry_vertical.value,
         levels: {
-          stage_maturity: c.stage_maturity.value, company_type: c.company_type.value,
-          geography: c.geography.value, revenue_range: c.revenue_range.value,
-          buying_signal: c.buying_signal.value,
+          stage_maturity: levels.stage_maturity, company_type: levels.company_type,
+          geography: levels.geography, revenue_range: levels.revenue_range,
+          buying_signal: levels.buying_signal,
         },
-        activation_state: c.activation_state.value,
-        activation_evidence_dated_within_months: c.activation_state.evidence_dated_within_months ?? null,
-        confidence: Object.fromEntries(Object.entries(c).map(([k, v]) => [k, v.confidence])),
-        missing_inputs: Object.fromEntries(Object.entries(c).map(([k, v]) => [k, v.missing_inputs])),
-        facts_summary: event.facts_summary,
+        activation_state: event.score.activation_state_used,
+        activation_evidence_dated_within_months: cls.activation_state.activation_evidence_dated ? 1 : null,
+        confidence,
+        missing_inputs,
+        facts_summary: {
+          revenue_usd: null,
+          headcount_total: event.apollo_summary.employees,
+          headcount_eng: event.apollo_summary.eng_headcount,
+        },
       };
     });
     const pythonResults = pythonScore(inputs);

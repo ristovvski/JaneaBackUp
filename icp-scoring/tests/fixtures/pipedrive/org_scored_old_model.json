@@ -1,11 +1,11 @@
 {
   "_fixture": "org_scored_old_model",
-  "_note": "Scored 10 days ago but on model v4. Inside the window yet on a superseded rubric, so the gate must RE-SCORE. This is the case a date-only gate gets wrong.",
+  "_note": "Scored 10 days ago but on model v5. Inside the window yet on a superseded rubric, so the gate must RE-SCORE. This is the case a date-only gate gets wrong.",
   "_icp_symbolic": {
     "icp_calculated": "ICP A",
     "icp_score": 88,
     "icp_scored_at": "@days_ago:10",
-    "icp_model_version": "v4"
+    "icp_model_version": "v5"
   },
   "_icp_symbolic_help": "The harness (tests/static/harness.mjs) expands these symbolic keys into hashed custom_fields using CONFIG, so the fixture stays readable and survives create_fields replacing the placeholder keys with real ones. `@days_ago:N` is resolved against CONFIG.now_iso at test time, so 'fresh' and 'stale' cannot rot into each other as the calendar moves.",
   "success": true,

@@ -1,6 +1,6 @@
 # engine/clay_score.py
 #
-# GENERATED from config/rubric_v5.json by scripts/gen_clay_python.mjs — model v5.
+# GENERATED from config/rubric_v6.json by scripts/gen_clay_python.mjs — model v6.
 # Do not hand-edit. Regenerate with `npm run gen:python`.
 #
 # This is the Clay Workflow "Score" code node. Clay code nodes run Python, so
@@ -11,11 +11,11 @@
 # recorded in REPORT.md.
 
 RUBRIC = {
-    "model_version": "v5",
+    "model_version": "v6",
     "weights": {"industries":15,"stage_maturity":25,"revenue_range":25,"company_type":25,"geography":10,"buying_signal":0},
     "levels": [0,3,7,10],
     "thresholds": {"A":75,"B":55},
-    "multipliers": {"Accelerating":1,"Transitioning":1,"Stable":0.85,"Contracting":0},
+    "multipliers": {"Accelerating":1,"Transitioning":0.95,"Stable":0.8,"Contracting":0},
     "activation_default": "Stable",
     "contracting_max_age_months": 12,
     "gating": ["stage_maturity","revenue_range","company_type"],

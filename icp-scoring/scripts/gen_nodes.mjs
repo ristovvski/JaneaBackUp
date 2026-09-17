@@ -9,21 +9,18 @@
 // Both copies are therefore SPLICED IN from their single source:
 //
 //   BuildClayRequest.js  <- engine/normalize.mjs, verbatim minus `export`
-//   ParseScored.js       <- the portable body of engine/clay_formula.txt,
-//                           which tests/contract/clay_parity.test.mjs already
-//                           asserts is deep-equal to engine/scoring.mjs
+//   ParseScored.js       <- engine/validate_event.mjs, the v6 boundary check
 //
-// So n8n's independent recompute is literally the same implementation Clay
-// runs, and a disagreement between Clay's posted score and n8n's recompute
-// means Clay's formula column is stale — which is exactly what we want to be
-// told about.
+// v5 spliced the scorer here so n8n could recompute and flag drift. v6 sends
+// three of the six levels already computed, so there is nothing to recompute
+// from; what ships instead is the validator, and the rule that rejects an
+// event is the same source its unit tests exercise.
 //
 // Run: npm run gen:nodes
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { BEGIN, END } from './gen_clay_formula.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const NODES = join(ROOT, 'n8n', 'nodes');
@@ -54,15 +51,21 @@ function inlineNormalizer() {
 }
 
 // ---------------------------------------------------------------------------
-// The parity-tested scoring body, ready to inline as a function
+// engine/validate_event.mjs, ready to inline
+//
+// Same trick as the normalizer: an n8n Code node cannot import, so the file is
+// written with no imports and its `export` keywords are stripped here. The
+// rule that rejects a scored event is therefore the same source the unit tests
+// exercise, not a second copy of it.
 // ---------------------------------------------------------------------------
-function inlineScorer() {
-  const formula = readFileSync(join(ROOT, 'engine', 'clay_formula.txt'), 'utf8');
-  const from = formula.indexOf(BEGIN);
-  const to = formula.indexOf(END);
-  if (from === -1 || to === -1) throw new Error('markers missing from engine/clay_formula.txt');
-  const body = formula.slice(from + BEGIN.length, to);
-  return `function scoreFromComponents(inputs) {\n${indent(body.trim(), '  ')}\n}`;
+function inlineValidator() {
+  const source = readFileSync(join(ROOT, 'engine', 'validate_event.mjs'), 'utf8');
+  if (/^\s*import\s/m.test(source)) {
+    throw new Error('engine/validate_event.mjs gained an import — it can no longer be inlined into a Code node');
+  }
+  const start = source.indexOf('export const STATES');
+  if (start === -1) throw new Error('cannot find STATES in engine/validate_event.mjs');
+  return source.slice(start).replace(/^export /gm, '');
 }
 
 // ===========================================================================
@@ -132,7 +135,7 @@ return [{
     identifier_value: identifier.value,
     identifier_confidence: identifier.confidence,
     identifier_warnings: identifier.warnings,
-    clay_url: cfg.clay_webhook_url,
+    clay_url: cfg.clay_engine_url,
     body,
   },
 }];
@@ -141,15 +144,21 @@ return [{
 // ===========================================================================
 // ParseScored
 // ===========================================================================
-const parseScored = `${BANNER(['engine/clay_formula.txt (portable body)'])}//
-// ParseScored — Path B's translation layer. Validates the Clay callback
-// against icp_scored_event.schema.json (constraints COPIED, not imported, per
-// §8.2) and independently recomputes the score.
+const parseScored = `${BANNER(['engine/validate_event.mjs'])}//
+// ParseScored — Path B's boundary. It validates the v6 event and rejects it on
+// any mismatch; it does not produce a score of its own.
 //
-// The recompute is the drift guard. Clay owns a formula column; this workflow
-// owns the writes. If the two disagree, Clay's column is stale — and the
-// tested implementation wins, because it is the one 500 parity cases run
-// against. The disagreement is flagged, not swallowed.
+// v5 recomputed. It could: seven classifier objects arrived and n8n re-derived
+// the composite from them, flagging a disagreement with Clay's formula column.
+// v6 removes the inputs that made that possible — geography, revenue_range and
+// buying_signal are levelled inside the table and arrive already scored — so a
+// recompute would have nothing to recompute FROM. The check that remains is
+// the one that still means something: is the posted score internally
+// consistent with the rubric this workflow holds? If not, the event does not
+// get written. A wrong grade in the CRM is worse than a loud failure.
+//
+// The validator is spliced from engine/validate_event.mjs, which has its own
+// unit tests, so the rule that rejects an event is the rule the tests exercise.
 
 // CONFIG on Path A, CONFIG B on Path B. The two Set nodes hold the same JSON,
 // but a Code node may only reference a node that is CONNECTED upstream of it:
@@ -170,101 +179,14 @@ if (cfg === null || cfg === undefined) {
 const item = $input.first().json;
 const raw = item.body || {};
 
-// ---------------------------------------------------------------------------
-// Inline schema check. Mirrors engine/schemas/icp_scored_event.schema.json.
-// ---------------------------------------------------------------------------
-const problems = [];
-const LEVELS = cfg.levels;
-const STATES = Object.keys(cfg.activation_multipliers);
-const MULTIPLIERS = Object.values(cfg.activation_multipliers);
-const COMPONENTS = [
-  'industry_vertical', 'stage_maturity', 'company_type',
-  'geography', 'revenue_range', 'activation_state', 'buying_signal',
-];
+${inlineValidator()}
 
-const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const isLevel = (v) => LEVELS.indexOf(v) !== -1;
-
-if (raw.event !== cfg.clay_event_name) problems.push(\`event must be "\${cfg.clay_event_name}"\`);
-if (typeof raw.event_id !== 'string' || raw.event_id.length < 8) problems.push('event_id must be a string of at least 8 characters');
-if (typeof raw.request_id !== 'string' || raw.request_id === '') problems.push('request_id must be a non-empty string');
-if (typeof raw.emitted_at !== 'string' || raw.emitted_at.length < 10) problems.push('emitted_at must be an ISO timestamp');
-if (raw.model_version !== cfg.model_version) problems.push(\`model_version must be "\${cfg.model_version}"\`);
-if (typeof raw.org_id !== 'string' || raw.org_id === '') problems.push('org_id must be a non-empty string');
-if (raw.deal_id !== null && raw.deal_id !== undefined && typeof raw.deal_id !== 'string') problems.push('deal_id must be a string or null');
-if (['domain', 'linkedin', 'name'].indexOf(raw.identifier_kind) === -1) problems.push('identifier_kind must be domain, linkedin or name');
-if (typeof raw.identifier_value !== 'string' || raw.identifier_value === '') problems.push('identifier_value must be a non-empty string');
-
-if (!isObject(raw.components)) {
-  problems.push('components must be an object');
-} else {
-  for (const component of COMPONENTS) {
-    const c = raw.components[component];
-    if (!isObject(c)) { problems.push(\`components.\${component} is missing\`); continue; }
-    if (!Array.isArray(c.evidence)) problems.push(\`components.\${component}.evidence must be an array\`);
-    else if (c.evidence.length > 6) problems.push(\`components.\${component}.evidence has more than 6 items\`);
-    if (['high', 'medium', 'low'].indexOf(c.confidence) === -1) problems.push(\`components.\${component}.confidence must be high, medium or low\`);
-    if (!Array.isArray(c.missing_inputs)) problems.push(\`components.\${component}.missing_inputs must be an array\`);
-
-    if (component === 'industry_vertical') {
-      if (c.value !== null && !Object.prototype.hasOwnProperty.call(cfg.vertical_tier, c.value)) {
-        problems.push(\`components.industry_vertical.value "\${c.value}" is not one of the 17 rubric verticals\`);
-      }
-    } else if (component === 'activation_state') {
-      if (c.value !== null && STATES.indexOf(c.value) === -1) {
-        problems.push(\`components.activation_state.value "\${c.value}" is not a rubric activation state\`);
-      }
-    } else if (c.value !== null && !isLevel(c.value)) {
-      problems.push(\`components.\${component}.value \${JSON.stringify(c.value)} is not one of \${JSON.stringify(LEVELS)}\`);
-    }
-  }
-  for (const key of Object.keys(raw.components)) {
-    if (COMPONENTS.indexOf(key) === -1) problems.push(\`components has an unknown key "\${key}"\`);
-  }
-}
-
-const posted = raw.score;
-if (!isObject(posted)) {
-  problems.push('score must be an object');
-} else {
-  if (posted.model_version !== cfg.model_version) problems.push(\`score.model_version must be "\${cfg.model_version}"\`);
-  if (!isLevel(posted.industry_level)) problems.push('score.industry_level must be a rubric level');
-  if (typeof posted.composite !== 'number' || posted.composite < 0 || posted.composite > 100) problems.push('score.composite must be a number in 0..100');
-  if (STATES.indexOf(posted.activation_state_used) === -1) problems.push('score.activation_state_used must be a rubric activation state');
-  if (MULTIPLIERS.indexOf(posted.multiplier) === -1) problems.push(\`score.multiplier must be one of \${JSON.stringify(MULTIPLIERS)}\`);
-  for (const key of ['final_score', 'final_score_without_activation']) {
-    const v = posted[key];
-    if (!Number.isInteger(v) || v < 0 || v > 100) problems.push(\`score.\${key} must be an integer in 0..100\`);
-  }
-  if (['scored', 'insufficient_data'].indexOf(posted.status) === -1) problems.push('score.status must be scored or insufficient_data');
-  if (posted.status === 'insufficient_data' && posted.grade !== null) problems.push('score.grade must be null when status is insufficient_data');
-  if (posted.status === 'scored' && ['A', 'B', 'C'].indexOf(posted.grade) === -1) problems.push('score.grade must be A, B or C when status is scored');
-  if (['high', 'medium', 'low'].indexOf(posted.confidence_overall) === -1) problems.push('score.confidence_overall must be high, medium or low');
-  if (typeof posted.tier2_candidate !== 'boolean') problems.push('score.tier2_candidate must be a boolean');
-  if (!Array.isArray(posted.flags)) problems.push('score.flags must be an array');
-  if (!isObject(posted.levels_used)) problems.push('score.levels_used must be an object');
-  else {
-    for (const key of ['industry', 'stage_maturity', 'company_type', 'geography', 'revenue_range', 'buying_signal']) {
-      if (!isLevel(posted.levels_used[key])) problems.push(\`score.levels_used.\${key} must be a rubric level\`);
-    }
-  }
-}
-
-if (!isObject(raw.facts_summary)) problems.push('facts_summary must be an object');
-
-const ALLOWED_TOP = [
-  'event', 'event_id', 'request_id', 'emitted_at', 'model_version', 'org_id', 'deal_id',
-  'identifier_kind', 'identifier_value', 'components', 'score', 'facts_summary',
-  'clay_table', 'clay_row_url',
-];
-for (const key of Object.keys(raw)) {
-  if (ALLOWED_TOP.indexOf(key) === -1) problems.push(\`unknown top-level key "\${key}"\`);
-}
+const problems = validateEvent(raw, cfg);
 
 if (problems.length > 0) {
   const error = new Error(
-    \`ICP_MALFORMED_EVENT: \${problems.length} schema violation(s) in \` +
-    \`\${cfg.clay_event_name} request_id=\${raw.request_id || '(none)'}: \${problems.join('; ')}\`
+    \`ICP_MALFORMED_EVENT: \${problems.length} problem(s) in the \${cfg.model_version} \` +
+    \`scored event for request_id=\${raw.request_id || '(none)'}: \${problems.join('; ')}\`
   );
   error.name = 'IcpMalformedEvent';
   error.problems = problems;
@@ -273,57 +195,59 @@ if (problems.length > 0) {
   throw error;
 }
 
-// ---------------------------------------------------------------------------
-// Independent recompute — the drift guard.
-// ---------------------------------------------------------------------------
-${inlineScorer()}
+const score = raw.score;
+const cls = raw.cls_all;
 
-const c = raw.components;
-const recomputed = scoreFromComponents({
-  industry_vertical: c.industry_vertical.value,
-  levels: {
-    stage_maturity: c.stage_maturity.value,
-    company_type: c.company_type.value,
-    geography: c.geography.value,
-    revenue_range: c.revenue_range.value,
-    buying_signal: c.buying_signal.value,
+// One flat view of the four classifier objects, so the note and the audit row
+// read every component the same way whether it carries a \`value\` or a \`level\`.
+const components = {
+  industry_vertical: {
+    value: cls.industry_vertical.value,
+    level: score.levels.industries,
+    evidence: cls.industry_vertical.evidence || [],
+    confidence: cls.industry_vertical.confidence,
+    missing_inputs: cls.industry_vertical.missing_inputs || [],
   },
-  activation_state: c.activation_state.value,
-  activation_evidence_dated_within_months:
-    c.activation_state.evidence_dated_within_months === undefined
+  stage_maturity: {
+    value: score.levels.stage_maturity,
+    level: score.levels.stage_maturity,
+    evidence: cls.stage_maturity.evidence || [],
+    confidence: cls.stage_maturity.confidence,
+    missing_inputs: cls.stage_maturity.missing_inputs || [],
+  },
+  company_type: {
+    value: score.levels.company_type,
+    level: score.levels.company_type,
+    evidence: cls.company_type.evidence || [],
+    confidence: cls.company_type.confidence,
+    missing_inputs: cls.company_type.missing_inputs || [],
+  },
+  activation_state: {
+    value: cls.activation_state.value,
+    level: null,
+    evidence: cls.activation_state.evidence || [],
+    confidence: cls.activation_state.confidence,
+    missing_inputs: cls.activation_state.missing_inputs || [],
+    activation_evidence_dated: cls.activation_state.activation_evidence_dated === undefined
       ? null
-      : c.activation_state.evidence_dated_within_months,
-  confidence: {
-    industry_vertical: c.industry_vertical.confidence,
-    stage_maturity: c.stage_maturity.confidence,
-    company_type: c.company_type.confidence,
-    geography: c.geography.confidence,
-    revenue_range: c.revenue_range.confidence,
-    buying_signal: c.buying_signal.confidence,
+      : cls.activation_state.activation_evidence_dated,
   },
-  missing_inputs: {
-    industry_vertical: c.industry_vertical.missing_inputs,
-    stage_maturity: c.stage_maturity.missing_inputs,
-    company_type: c.company_type.missing_inputs,
-    geography: c.geography.missing_inputs,
-    revenue_range: c.revenue_range.missing_inputs,
-    buying_signal: c.buying_signal.missing_inputs,
-  },
-  facts_summary: raw.facts_summary,
-});
+};
 
-const drift = [];
-for (const key of ['composite', 'final_score', 'final_score_without_activation', 'grade', 'status', 'activation_state_used', 'multiplier', 'confidence_overall', 'tier2_candidate']) {
-  if (JSON.stringify(recomputed[key]) !== JSON.stringify(posted[key])) {
-    drift.push(\`\${key}: clay=\${JSON.stringify(posted[key])} n8n=\${JSON.stringify(recomputed[key])}\`);
-  }
+// Geography, revenue_range and buying_signal have no classifier object in v6.
+// They are levels and nothing else, and saying so explicitly is better than
+// leaving the note to guess why those components have no evidence.
+const COMPUTED = ['geography', 'revenue_range', 'buying_signal'];
+for (const name of COMPUTED) {
+  components[name] = {
+    value: score.levels[name],
+    level: score.levels[name],
+    evidence: [],
+    confidence: null,
+    missing_inputs: [],
+    computed_by_table: true,
+  };
 }
-
-// The tested implementation wins. Clay's column is a convenience; this
-// recompute is the one with 500 parity cases behind it.
-const score = recomputed;
-const flags = score.flags.slice();
-if (drift.length > 0) flags.push('clay_score_drift');
 
 return [{
   json: {
@@ -334,20 +258,22 @@ return [{
     _rate_exceeded: item._rate_exceeded === true,
 
     request_id: raw.request_id,
-    event_id: raw.event_id,
-    emitted_at: raw.emitted_at,
+    event_id: raw.event_id === undefined ? null : raw.event_id,
+    emitted_at: raw.emitted_at === undefined ? null : raw.emitted_at,
     org_id: raw.org_id,
     deal_id: raw.deal_id === undefined ? null : raw.deal_id,
     identifier_kind: raw.identifier_kind,
     identifier_value: raw.identifier_value,
 
-    components: raw.components,
-    facts_summary: raw.facts_summary,
-    score: Object.assign({}, score, { flags }),
-    clay_score: posted,
-    score_drift: drift,
+    resolved: raw.resolved,
+    cls_all: cls,
+    components: components,
+    conflict_note: cls.conflict_note === undefined ? null : cls.conflict_note,
+    jobs: raw.jobs,
+    apollo_summary: raw.apollo_summary,
+    score: score,
     clay_table: raw.clay_table === undefined ? null : raw.clay_table,
-    model_version: cfg.model_version,
+    model_version: raw.model_version,
   },
 }];
 `;

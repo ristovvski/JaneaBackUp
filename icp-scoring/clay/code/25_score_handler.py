@@ -4,7 +4,7 @@
 # 24 Score (ICP v5) — Clay code-node handler
 #
 # Everything above this line is engine/clay_score.py, generated from
-# config/rubric_v5.json by scripts/gen_clay_python.mjs and asserted deep-equal
+# config/rubric_v6.json by scripts/gen_clay_python.mjs and asserted deep-equal
 # to engine/scoring.mjs over the golden fixtures and 500 generated inputs by
 # tests/contract/python_parity.test.mjs. It is embedded verbatim; nothing below
 # changes a number.

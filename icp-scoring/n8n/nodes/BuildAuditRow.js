@@ -4,11 +4,15 @@
 // A dedupe that leaves no trace is indistinguishable from a lost event when
 // someone asks why an organization was not scored.
 //
-// The header row of the ICP_Audit sheet must match COLUMNS below, in order.
-// tests/static/nodes_execute.test.mjs asserts the emitted row has exactly
-// these keys in exactly this order, so a column added here without adding it
-// to the sheet fails a test rather than silently shifting every value one to
-// the left.
+// The icp_audit Data Table's columns must match COLUMNS below by NAME: the
+// Data Table node maps input keys onto columns by name, so a column added here
+// and not to the table is silently dropped rather than shifting the row.
+// RUNBOOK.md carries the column list and its types.
+//
+// tests/static/nodes_execute.test.mjs asserts the emitted row has exactly these
+// keys in exactly this order. Order does not affect the write — it keeps the
+// row readable in a trace, and it makes an added column a failing test rather
+// than a quiet change of shape.
 
 // CONFIG on Path A, CONFIG B on Path B. The two Set nodes hold the same JSON,
 // but a Code node may only reference a node that is CONNECTED upstream of it:
@@ -39,7 +43,7 @@ try { noteResponse = $('POST note').item.json; } catch (e) { noteResponse = null
 
 const score = parsed.score;
 const components = parsed.components;
-const levels = score.levels_used;
+const levels = score.levels;
 
 const COLUMNS = [
   'ts', 'request_id', 'execution_id', 'trigger', 'deal_id', 'org_id',
@@ -55,6 +59,7 @@ const COLUMNS = [
 // Collapse every component's gaps into one auditable string.
 const missing = [];
 for (const component of Object.keys(components)) {
+  if (components[component].computed_by_table) continue;
   const items = components[component].missing_inputs || [];
   if (items.length > 0) missing.push(`${component}:${items.join('|')}`);
 }
@@ -62,15 +67,22 @@ for (const component of Object.keys(components)) {
 // Evidence as JSON so a row stays one cell and stays machine-readable.
 const evidence = {};
 for (const component of Object.keys(components)) {
+  // A component the table computed has no evidence by construction. Writing
+  // `"geography": []` into every row would suggest the evidence was looked for
+  // and not found, which is not what happened.
+  if (components[component].computed_by_table) continue;
   evidence[component] = components[component].evidence || [];
 }
 
 const errorBits = [];
 if (parsed._duplicate) errorBits.push('duplicate');
 if (parsed._rate_exceeded) errorBits.push(`rate_exceeded:${parsed._rate_this_hour}/h`);
-if ((parsed.score_drift || []).length > 0) {
-  errorBits.push(`clay_score_drift:${parsed.score_drift.join(' | ')}`);
-}
+// v5 recorded a drift between Clay's score and n8n's recompute here. v6 has no
+// recompute to disagree with: a score that does not match the rubric is
+// rejected outright by ParseScored and never reaches this node. What takes its
+// place is the table's own conflict note, which explains a score rather than
+// contradicting it.
+if (parsed.conflict_note) errorBits.push(`conflict:${parsed.conflict_note}`);
 
 const row = {
   ts: cfg.now_iso,
@@ -84,13 +96,12 @@ const row = {
   model_version: parsed.model_version,
 
   industry_vertical: components.industry_vertical.value === null ? '' : components.industry_vertical.value,
-  industry_level: score.industry_level,
+  industry_level: levels.industries,
   stage_level: levels.stage_maturity,
   type_level: levels.company_type,
   geo_level: levels.geography,
   revenue_level: levels.revenue_range,
-  buying_level: score.buying_signal_level === null || score.buying_signal_level === undefined
-    ? '' : score.buying_signal_level,
+  buying_level: levels.buying_signal,
 
   activation_state: score.activation_state_used,
   multiplier: score.multiplier,
@@ -113,7 +124,8 @@ const row = {
   error: errorBits.join(' · '),
 };
 
-// Emit in COLUMNS order so the Sheets append lines up with the header row.
+// Emit in COLUMNS order. The Data Table maps by name, so this is for the
+// human reading the execution, not for the write.
 const ordered = {};
 for (const column of COLUMNS) ordered[column] = row[column];
 

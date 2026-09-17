@@ -6,6 +6,11 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 import {
   runCodeNode, readNode, makeConfig, orgFixture, clayFixture, pipedriveFixture, NOW_ISO,
@@ -112,7 +117,8 @@ describe('Dedupe', () => {
     const second = dedupeB(event, staticData);
     assert.equal(second.length, 1, 'a Path B duplicate must NOT be dropped');
     assert.equal(second[0].json._duplicate, true);
-    assert.equal(second[0].json._dedupe_key, 'clay:scored:req-icp-0001:clay-evt-a1b2c3d4e5f6');
+    // v6 sends no event_id, so the key is request_id with a placeholder half.
+    assert.equal(second[0].json._dedupe_key, 'clay:scored:req-icp-0001:-');
   });
 
   test('two different events do not collide', () => {
@@ -134,12 +140,36 @@ describe('Dedupe', () => {
     assert.equal(again.length, 1);
   });
 
-  test('a Clay callback missing request_id or event_id throws rather than poisoning the ledger', () => {
-    for (const missing of ['request_id', 'event_id']) {
-      const event = clayFixture('icp_scored_A.json');
-      delete event[missing];
-      assert.throws(() => dedupeB(event, {}), /ICP_MALFORMED_EVENT/, missing);
-    }
+  test('a Clay callback with no request_id throws rather than poisoning the ledger', () => {
+    // v5 needed request_id AND event_id. v6 sends no event_id at all, so the
+    // key is request_id plus whatever event_id happens to be there — and
+    // request_id alone is now the thing that must never be missing, because
+    // without it every callback shares one key and all but the first is
+    // silently dropped.
+    const event = clayFixture('icp_scored_A.json');
+    delete event.request_id;
+    assert.throws(() => dedupeB(event, {}), /ICP_MALFORMED_EVENT/);
+  });
+
+  test('an event_id, when the table sends one, separates two runs of the same request', () => {
+    const staticData = {};
+    const first = clayFixture('icp_scored_A.json');
+    first.event_id = 'run-1';
+    const second = clayFixture('icp_scored_A.json');
+    second.event_id = 'run-2';
+    assert.equal(dedupeB(first, staticData)[0].json._duplicate, false);
+    assert.equal(dedupeB(second, staticData)[0].json._duplicate, false, 'a second run is not a duplicate');
+    assert.equal(dedupeB(second, staticData)[0].json._duplicate, true, 'the same run twice is');
+  });
+
+  test('the path is read from the webhook above, not from a key in the body', () => {
+    // v5 detected Path B by `event === "icp.scored"`; v6's consolidated event
+    // has no such key. An empty body down the Clay webhook must still be
+    // recognised as Path B — and fail for the right reason.
+    assert.throws(() => dedupeB({}, {}), /ICP_MALFORMED_EVENT/);
+    // And a Path B body arriving down the Pipedrive webhook is a Path A
+    // delivery with no meta.id, which is the other error entirely.
+    assert.throws(() => dedupeA(clayFixture('icp_scored_A.json'), {}), /ICP_UNKNOWN_PAYLOAD/);
   });
 
   test('an unrecognised body throws — both endpoints are authenticated, so it is real', () => {
@@ -245,11 +275,11 @@ describe('IdempotencyGate', () => {
     assert.equal(out.json.existing.age_days, 200);
   });
 
-  test('old model (v4) inside the window -> skip false', () => {
+  test('old model (v5) inside the window -> skip false', () => {
     const { org } = orgFixture('org_scored_old_model.json', cfg);
     const [out] = gate(normalized(), org);
     assert.equal(out.json.skip, false, 'a date-only gate would wrongly skip this');
-    assert.match(out.json.reason, /model version "v4"/);
+    assert.match(out.json.reason, /model version "v5"/);
     assert.equal(out.json.existing.age_days, 10);
   });
 
@@ -343,6 +373,35 @@ describe('BuildClayRequest — identifier priority', () => {
     assert.equal(out.identifier_confidence, 'low');
   });
 
+  test('a name-only org still carries the three fields find_by_name needs', () => {
+    // The table's find_by_name step has nothing but these. If the body omitted
+    // company_name the lookup could not run at all, and without the country and
+    // state it would resolve the wrong company of the same name — which scores
+    // a stranger's CRM record and looks exactly like a correct run.
+    const out = requestFor('org_no_identifiers.json');
+    assert.equal(out.identifier_kind, 'name');
+    assert.ok(Object.prototype.hasOwnProperty.call(out.body, 'company_name'));
+    assert.ok(Object.prototype.hasOwnProperty.call(out.body, 'hq_country'));
+    assert.ok(Object.prototype.hasOwnProperty.call(out.body, 'hq_state'));
+    assert.equal(typeof out.body.company_name, 'string');
+    assert.ok(out.body.company_name.length > 0);
+  });
+
+  test('every enrichment key is present even when null — omission is not absence', () => {
+    // Clay's facts_json must be able to tell "enrichment did not find it" from
+    // "we never asked". An omitted key destroys that distinction, so the body
+    // sends the full key set on every path.
+    const KEYS = [
+      'request_id', 'org_id', 'deal_id', 'identifier_kind', 'identifier_value',
+      'domain', 'linkedin_url', 'company_name', 'hq_country', 'hq_state',
+      'model_version', 'callback_url',
+    ];
+    for (const fixtureName of ['org_full.json', 'org_no_website.json', 'org_no_identifiers.json']) {
+      const out = requestFor(fixtureName);
+      assert.deepEqual(Object.keys(out.body).sort(), [...KEYS].sort(), fixtureName);
+    }
+  });
+
   test('the spliced normalizer agrees with engine/normalize.mjs', () => {
     for (const fixtureName of ['org_full.json', 'org_no_website.json', 'org_no_identifiers.json']) {
       const { org } = orgFixture(fixtureName, cfg);
@@ -380,7 +439,7 @@ describe('BuildClayRequest — identifier priority', () => {
   test('the callback URL comes from CONFIG, not from a literal', () => {
     const out = requestFor('org_full.json');
     assert.equal(out.body.callback_url, cfg.clay_callback_url);
-    assert.equal(out.clay_url, cfg.clay_webhook_url);
+    assert.equal(out.clay_url, cfg.clay_engine_url);
   });
 
   test('an org with nothing usable throws a typed error', () => {
@@ -394,12 +453,12 @@ describe('BuildClayRequest — identifier priority', () => {
 
 // ==========================================================================
 describe('ParseScored', () => {
-  test('a valid event parses and the recompute agrees with the engine', () => {
+  test('a valid event parses and carries the posted score through untouched', () => {
     const event = clayFixture('icp_scored_A.json');
     const [out] = parseScored(event);
-    assert.deepEqual(out.json.score_drift, [], 'n8n and Clay must agree');
+    assert.deepEqual(out.json.score, event.score, 'the posted score is passed through, not replaced');
     assert.equal(out.json.score.grade, 'A');
-    assert.equal(out.json.score.final_score, event.score.final_score);
+    assert.equal(out.json.model_version, 'v6');
   });
 
   test('malformed -> a typed error naming every violation', () => {
@@ -408,7 +467,7 @@ describe('ParseScored', () => {
       assert.equal(error.name, 'IcpMalformedEvent');
       assert.match(error.message, /ICP_MALFORMED_EVENT/);
       assert.ok(error.problems.length >= 4, `expected >= 4 problems, got ${error.problems.length}`);
-      assert.ok(error.problems.some((p) => /geography is missing/.test(p)));
+      assert.ok(error.problems.some((p) => /jobs\.eng_open is missing/.test(p)));
       assert.ok(error.problems.some((p) => /final_score/.test(p)));
       assert.ok(error.problems.some((p) => /multiplier/.test(p)));
       assert.ok(error.problems.some((p) => /unknown top-level key/.test(p)));
@@ -422,63 +481,89 @@ describe('ParseScored', () => {
       'icp_scored_insufficient.json', 'icp_scored_tier2.json',
     ]) {
       const [out] = parseScored(clayFixture(name));
-      assert.deepEqual(out.json.score_drift, [], name);
+      assert.equal(out.json._path, 'B', name);
     }
   });
 
   test('a wrong model version is rejected', () => {
     const event = clayFixture('icp_scored_A.json');
-    event.model_version = 'v4';
-    assert.throws(() => parseScored(event), /model_version must be "v5"/);
+    event.model_version = 'v5';
+    assert.throws(() => parseScored(event), /model_version must be "v6"/);
   });
 
-  test('a vertical outside the 17 is rejected', () => {
+  test('a vertical outside the rubric must score 0 and say so', () => {
+    // The rubric's unknown-vertical rule, enforced at the boundary: a table
+    // that invents a vertical AND levels it as if it were known is exactly the
+    // silent failure this check exists for.
     const event = clayFixture('icp_scored_A.json');
-    event.components.industry_vertical.value = 'Crypto Casinos';
-    assert.throws(() => parseScored(event), /not one of the 17 rubric verticals/);
+    event.cls_all.industry_vertical.value = 'Crypto Casinos';
+    assert.throws(() => parseScored(event), /not in the rubric, so score\.levels\.industries must be 0/);
+
+    // Levelled 0 and flagged, it is accepted — the score just has to say so.
+    const honest = clayFixture('icp_scored_A.json');
+    honest.cls_all.industry_vertical.value = 'Crypto Casinos';
+    honest.score.levels.industries = 0;
+    honest.score.flags = honest.score.flags.concat(['unknown_vertical']);
+    honest.score.composite = 77.5;
+    honest.score.final_score = 78;
+    honest.score.final_score_without_activation = 78;
+    const [out] = parseScored(honest);
+    assert.equal(out.json.score.levels.industries, 0);
   });
 
   test('an off-ladder level is rejected', () => {
     const event = clayFixture('icp_scored_A.json');
-    event.components.geography.value = 5;
-    assert.throws(() => parseScored(event), /is not one of \[0,3,7,10\]/);
+    event.score.levels.geography = 5;
+    assert.throws(() => parseScored(event), /score\.levels\.geography must be one of \[0,3,7,10\]/);
   });
 
-  test('the drift guard fires when Clay disagrees, and the tested value wins', () => {
+  test('a composite that does not match the posted levels is rejected, not corrected', () => {
+    // This is the v6 posture in one case. v5 would have recomputed, flagged a
+    // drift and written its own number; v6 refuses the event, because the only
+    // thing a disagreement here proves is that one of the two is wrong and n8n
+    // no longer has the inputs to say which.
     const event = clayFixture('icp_scored_A.json');
-    event.score.final_score = 61;      // Clay says 61
-    event.score.grade = 'B';
-    const [out] = parseScored(event);
-    assert.ok(out.json.score_drift.length > 0, 'the disagreement must be reported');
-    assert.ok(out.json.score_drift.some((d) => d.startsWith('final_score:')));
-    assert.equal(out.json.score.final_score, 93, 'the tested recompute wins');
-    assert.equal(out.json.score.grade, 'A');
-    assert.ok(out.json.score.flags.includes('clay_score_drift'));
-    assert.equal(out.json.clay_score.final_score, 61, 'and Clay\'s value is kept for the audit row');
+    event.score.composite = 61;
+    assert.throws(() => parseScored(event), (error) => {
+      assert.equal(error.name, 'IcpMalformedEvent');
+      assert.ok(error.problems.some((p) => /composite is 61, but the posted levels weigh/.test(p)));
+      return true;
+    });
   });
 
-  test('the recompute matches engine/scoring.mjs exactly, on every fixture', () => {
-    for (const name of [
-      'icp_scored_A.json', 'icp_scored_B_stable.json', 'icp_scored_contracting.json',
-      'icp_scored_insufficient.json', 'icp_scored_tier2.json',
-    ]) {
-      const event = clayFixture(name);
-      const [out] = parseScored(event);
-      const c = event.components;
-      const expected = score({
-        industry_vertical: c.industry_vertical.value,
-        levels: {
-          stage_maturity: c.stage_maturity.value, company_type: c.company_type.value,
-          geography: c.geography.value, revenue_range: c.revenue_range.value,
-          buying_signal: c.buying_signal.value,
-        },
-        activation_state: c.activation_state.value,
-        activation_evidence_dated_within_months: c.activation_state.evidence_dated_within_months ?? null,
-        confidence: Object.fromEntries(Object.entries(c).map(([k, v]) => [k, v.confidence])),
-        missing_inputs: Object.fromEntries(Object.entries(c).map(([k, v]) => [k, v.missing_inputs])),
-        facts_summary: event.facts_summary,
-      });
-      assert.deepEqual(out.json.score, expected, name);
+  test('a grade that does not match the thresholds is rejected', () => {
+    const event = clayFixture('icp_scored_A.json');
+    event.score.grade = 'B';
+    assert.throws(() => parseScored(event), /is A at thresholds/);
+  });
+
+  test('a multiplier that does not match the activation state is rejected', () => {
+    const event = clayFixture('icp_scored_B_stable.json');
+    assert.equal(event.score.activation_state_used, 'Stable');
+    event.score.multiplier = 1;
+    assert.throws(() => parseScored(event), /rubric gives Stable a multiplier of 0\.8/);
+  });
+
+  test('an undated Contracting must be downgraded and flagged before it is posted', () => {
+    const event = clayFixture('icp_scored_contracting.json');
+    event.cls_all.activation_state.activation_evidence_dated = false;
+    assert.throws(() => parseScored(event), (error) => {
+      assert.ok(error.problems.some((p) => /activation_state_used is "Contracting", but cls_all/.test(p)));
+      return true;
+    });
+  });
+
+  test('the four classifiers and the three computed levels are both readable downstream', () => {
+    const [out] = parseScored(clayFixture('icp_scored_A.json'));
+    const c = out.json.components;
+    for (const name of ['industry_vertical', 'stage_maturity', 'company_type', 'activation_state']) {
+      assert.ok(c[name].evidence.length > 0, `${name} should carry classifier evidence`);
+      assert.ok(!c[name].computed_by_table, `${name} is a classifier, not a computed level`);
+    }
+    for (const name of ['geography', 'revenue_range', 'buying_signal']) {
+      assert.equal(c[name].computed_by_table, true, name);
+      assert.deepEqual(c[name].evidence, [], `${name} has no classifier, so no evidence`);
+      assert.equal(c[name].confidence, null, `${name} has no classifier, so no confidence`);
     }
   });
 });
@@ -499,7 +584,7 @@ describe('BuildOrgPatch', () => {
     assert.equal(out.patch.custom_fields[cfg.f_icp_calculated], cfg.opt_icp_calculated['ICP A']);
     assert.equal(out.patch.custom_fields[cfg.f_icp_score], 93);
     assert.equal(out.patch.custom_fields[cfg.f_icp_scored_at], '2026-09-09');
-    assert.equal(out.patch.custom_fields[cfg.f_icp_model_version], 'v5');
+    assert.equal(out.patch.custom_fields[cfg.f_icp_model_version], 'v6');
   });
 
   test('the enum is written by option id, never by label', () => {
@@ -564,7 +649,7 @@ describe('BuildOrgPatch', () => {
       org.custom_fields[cfg.f_icp_calculated] = cfg.opt_icp_calculated['ICP A'];
       org.custom_fields[cfg.f_icp_score] = 93;
       org.custom_fields[cfg.f_icp_scored_at] = '2026-09-09';
-      org.custom_fields[cfg.f_icp_model_version] = 'v5';
+      org.custom_fields[cfg.f_icp_model_version] = 'v6';
     });
     assert.deepEqual(out.patch, {});
     assert.equal(out.patch_is_empty, true);
@@ -577,7 +662,7 @@ describe('BuildOrgPatch', () => {
       org.custom_fields[cfg.f_icp_calculated] = cfg.opt_icp_calculated['ICP A'];
       org.custom_fields[cfg.f_icp_score] = 91; // stale score
       org.custom_fields[cfg.f_icp_scored_at] = '2026-09-09';
-      org.custom_fields[cfg.f_icp_model_version] = 'v5';
+      org.custom_fields[cfg.f_icp_model_version] = 'v6';
     });
     assert.deepEqual(out.changed_fields, [cfg.f_icp_score]);
     assert.deepEqual(Object.keys(out.patch.custom_fields), [cfg.f_icp_score]);
@@ -626,7 +711,7 @@ describe('BuildNote', () => {
   test('scored A -> 5 component lines, and every §8.3 line is present', () => {
     const { note } = noteFor('icp_scored_A.json');
     const lines = note.note.split('\n');
-    assert.match(lines[0], /^ICP v5 — Calculated: ICP A \(93\/100\)$/);
+    assert.match(lines[0], /^ICP v6 — Calculated: ICP A \(93\/100\)$/);
     const componentLines = lines.filter((l) => /^(Industry|Stage|Type|Geography|Revenue) \d+ /.test(l));
     assert.equal(componentLines.length, 5, `expected 5 component lines, got:\n${note.note}`);
     assert.ok(lines.some((l) => l.startsWith('Activation:')));
@@ -638,7 +723,10 @@ describe('BuildNote', () => {
   test('the component lines read "<name> <level> <text> — <evidence>"', () => {
     const { note } = noteFor('icp_scored_A.json');
     assert.match(note.note, /^Industry 10 FinTech \(Anchor\) — li_industry: Financial Services/m);
-    assert.match(note.note, /^Geography 10 US-based — hq_country: United States/m);
+    // Geography has no classifier in v6, so its line is name, level and text
+    // with no evidence tail. The line still appears: a rep needs to see every
+    // component that moved the score, evidence or not.
+    assert.match(note.note, /^Geography 10 US-based$/m);
   });
 
   test('the level text is the rubric text, from config', () => {
@@ -647,15 +735,43 @@ describe('BuildNote', () => {
     assert.ok(note.note.includes(cfg.component_scales.revenue_range['7']));
   });
 
-  test('the Reference line carries HC, eng HC and the buying signal', () => {
+  test('the Reference line carries HC, eng HC, the buying signal and the v6 additions', () => {
     const { note } = noteFor('icp_scored_A.json');
-    assert.match(note.note, /^Reference: HC 190 · eng HC 62 · buying signal 7$/m);
+    const line = note.note.split('\n').find((l) => l.startsWith('Reference:'));
+    assert.match(line, /HC 190 · eng HC 62 · buying signal 7/);
+    // v6 is the first version that sends the jobs block and the revenue band.
+    assert.match(line, /eng roles open 11/);
+    assert.match(line, /revenue \$10M-\$25M/);
   });
 
-  test('Stable shows the ×0.85 that cost the grade', () => {
+  test('no open engineering roles reads n/a, not 0, when the provider found nothing', () => {
+    // The distinction the whole stage_maturity argument turned on: "the jobs
+    // provider returned nothing" and "this company is hiring nobody" are
+    // opposite facts, and a note that prints 0 for both is lying about one.
+    const { note } = noteFor('icp_scored_insufficient.json');
+    const line = note.note.split('\n').find((l) => l.startsWith('Reference:'));
+    assert.match(line, /eng roles open n\/a/);
+  });
+
+  test('a conflict the table reported gets its own line', () => {
+    const { note } = noteFor('icp_scored_contracting.json');
+    assert.match(note.note, /^Conflict: headcount fell 12% while the funding stage still reads Series C$/m);
+  });
+
+  test('a computed component contributes nothing to the Missing line', () => {
+    // geography, revenue_range and buying_signal have no classifier in v6, so
+    // they have no confidence either. Reading that absence as "low confidence"
+    // would put three components on the Missing line of every single note.
+    const { note } = noteFor('icp_scored_A.json');
+    const missing = note.note.split('\n').find((l) => l.startsWith('Missing / low confidence:'));
+    assert.doesNotMatch(missing, /geography/);
+    assert.doesNotMatch(missing, /buying_signal/);
+  });
+
+  test('Stable shows the ×0.80 that cost the grade', () => {
     const { note } = noteFor('icp_scored_B_stable.json');
-    assert.match(note.note, /Activation: Stable ×0\.85/);
-    assert.match(note.note, /Composite: 85 ×0\.85 → 72 → ICP B/);
+    assert.match(note.note, /Activation: Stable ×0\.80/);
+    assert.match(note.note, /Composite: 85 ×0\.80 → 68 → ICP B/);
   });
 
   test('Contracting shows the counterfactual', () => {
@@ -666,7 +782,7 @@ describe('BuildNote', () => {
 
   test('insufficient_data reads "Insufficient data" and the Missing line is non-empty', () => {
     const { note } = noteFor('icp_scored_insufficient.json');
-    assert.match(note.note, /^ICP v5 — Calculated: Insufficient data$/m);
+    assert.match(note.note, /^ICP v6 — Calculated: Insufficient data$/m);
     assert.ok(!/\(\d+\/100\)/.test(note.note.split('\n')[0]), 'no score in the header');
     const missing = note.note.split('\n').find((l) => l.startsWith('Missing / low confidence:'));
     assert.ok(missing, 'the Missing line is mandatory');
@@ -693,8 +809,8 @@ describe('BuildNote', () => {
 
   test('a pathological evidence string is trimmed deterministically, not truncated raggedly', () => {
     const event = clayFixture('icp_scored_A.json');
-    for (const component of Object.keys(event.components)) {
-      event.components[component].evidence = [
+    for (const component of ['industry_vertical', 'company_type', 'stage_maturity', 'activation_state']) {
+      event.cls_all[component].evidence = [
         `li_description: ${'x'.repeat(190)}`, `website_summary: ${'y'.repeat(190)}`,
       ];
     }
@@ -708,16 +824,17 @@ describe('BuildNote', () => {
 
   test('the footer carries request_id and the model version', () => {
     const { note } = noteFor('icp_scored_A.json');
-    assert.match(note.note, /request_id req-icp-0001 · model v5 · 2026-09-09/);
+    assert.match(note.note, /request_id req-icp-0001 · model v6 · 2026-09-09/);
   });
 
-  test('a Clay drift is surfaced in the note, not only in the audit row', () => {
+  test('a score the rubric disagrees with never reaches the note at all', () => {
+    // v5 wrote its own number and stamped CLAY SCORE DRIFT on the note. v6 has
+    // no number of its own to write, so the event is refused upstream and the
+    // note is never built — which is why there is no drift banner to look for.
     const event = clayFixture('icp_scored_A.json');
     event.score.final_score = 61;
     event.score.grade = 'B';
-    const [parsed] = parseScored(event);
-    const note = buildNote(parsed.json)[0].json;
-    assert.match(note.note, /CLAY SCORE DRIFT/);
+    assert.throws(() => parseScored(event), /ICP_MALFORMED_EVENT/);
   });
 });
 
@@ -733,6 +850,40 @@ describe('BuildAuditRow', () => {
     'tier2_candidate', 'flags', 'missing_inputs', 'evidence_json',
     'patch_written', 'note_id', 'error',
   ];
+
+  test('the table spec and the node agree on the column set', () => {
+    // The Data Table node maps by NAME. A column in one list and not the other
+    // is a value that vanishes on write with no error anywhere — so the two
+    // lists are compared here rather than being kept in step by hand.
+    const spec = JSON.parse(
+      readFileSync(join(ROOT, 'config', 'icp_audit_table.json'), 'utf8')
+    );
+    assert.deepEqual(spec.columns.map((c) => c.name), EXPECTED_COLUMNS);
+    const TYPES = new Set(['string', 'number', 'boolean', 'date']);
+    for (const column of spec.columns) {
+      assert.ok(TYPES.has(column.type), `${column.name}: n8n Data Tables have no "${column.type}" type`);
+    }
+  });
+
+  test('every emitted value fits the type its column declares', () => {
+    const spec = JSON.parse(
+      readFileSync(join(ROOT, 'config', 'icp_audit_table.json'), 'utf8')
+    );
+    const typeOf = new Map(spec.columns.map((c) => [c.name, c.type]));
+    for (const name of [
+      'icp_scored_A.json', 'icp_scored_B_stable.json', 'icp_scored_contracting.json',
+      'icp_scored_insufficient.json', 'icp_scored_tier2.json',
+    ]) {
+      const [parsed] = parseScored(clayFixture(name));
+      const [row] = auditRow(parsed.json);
+      for (const [key, value] of Object.entries(row.json)) {
+        const expected = typeOf.get(key);
+        if (expected === 'number') assert.equal(typeof value, 'number', `${name} / ${key} = ${JSON.stringify(value)}`);
+        else if (expected === 'boolean') assert.equal(typeof value, 'boolean', `${name} / ${key}`);
+        else assert.equal(typeof value, 'string', `${name} / ${key} = ${JSON.stringify(value)}`);
+      }
+    }
+  });
 
   test('the row has the §8.4 columns, in the §8.4 order', () => {
     const [parsed] = parseScored(clayFixture('icp_scored_A.json'));
@@ -777,28 +928,50 @@ describe('BuildAuditRow', () => {
     assert.equal(row.json.note_id, '');
   });
 
-  test('evidence_json is parseable and covers all seven components', () => {
+  test('evidence_json covers the four classifiers and only those', () => {
     const [parsed] = parseScored(clayFixture('icp_scored_A.json'));
     const [row] = auditRow(parsed.json);
     const evidence = JSON.parse(row.json.evidence_json);
-    assert.equal(Object.keys(evidence).length, 7);
+    assert.deepEqual(
+      Object.keys(evidence).sort(),
+      ['activation_state', 'company_type', 'industry_vertical', 'stage_maturity'],
+    );
     assert.ok(Array.isArray(evidence.industry_vertical));
+    // A computed level has no evidence by construction. An empty array under
+    // `geography` would read as "we looked and found nothing", which is a
+    // different and untrue claim.
+    assert.equal(evidence.geography, undefined);
   });
 
-  test('missing_inputs is recorded per component', () => {
+  test('missing_inputs is recorded per classifier', () => {
     const [parsed] = parseScored(clayFixture('icp_scored_insufficient.json'));
     const [row] = auditRow(parsed.json);
-    assert.match(row.json.missing_inputs, /revenue_range:revenue_estimate_usd/);
+    assert.match(row.json.missing_inputs, /stage_maturity:funding_stage/);
     assert.equal(row.json.grade, '', 'no grade on insufficient data');
     assert.equal(row.json.status, 'insufficient_data');
+    // revenue_range is the component that made this insufficient, and in v6 it
+    // has no classifier to report a gap. The flag is where that survives.
+    assert.match(row.json.flags, /insufficient:[^|]*revenue_range/);
   });
 
-  test('a Clay drift is recorded in the error column', () => {
-    const event = clayFixture('icp_scored_A.json');
-    event.score.composite = 10;
-    const [parsed] = parseScored(event);
+  test("the table's conflict note is recorded in the error column", () => {
+    // v5 used this column for a score drift between Clay and n8n's recompute.
+    // v6 rejects a disagreeing score outright, so what lands here instead is
+    // the conflict the table itself reported — something that explains a score
+    // rather than contradicting it.
+    const [parsed] = parseScored(clayFixture('icp_scored_contracting.json'));
     const [row] = auditRow(parsed.json);
-    assert.match(row.json.error, /clay_score_drift/);
+    assert.match(row.json.error, /^conflict:headcount fell 12%/);
+  });
+
+  test('a duplicate still writes a row, flagged', () => {
+    const staticData = {};
+    const event = clayFixture('icp_scored_A.json');
+    parseScored(event, staticData);
+    const [parsed] = parseScored(event, staticData);
+    assert.equal(parsed.json._duplicate, true);
+    const [row] = auditRow(parsed.json);
+    assert.match(row.json.error, /duplicate/);
   });
 });
 
@@ -830,7 +1003,7 @@ describe('BuildErrorPatch', () => {
     const { org } = orgFixture('org_full.json', cfg);
     org.custom_fields[cfg.f_icp_calculated] = cfg.opt_icp_calculated.Error;
     org.custom_fields[cfg.f_icp_scored_at] = '2026-09-09';
-    org.custom_fields[cfg.f_icp_model_version] = 'v5';
+    org.custom_fields[cfg.f_icp_model_version] = 'v6';
     const [out] = runCodeNode(SRC.BuildErrorPatch, {
       input: [{ org_id: '10001', organization: org, error: { name: 'X', message: 'y' } }],
       nodes: { CONFIG: cfg },
@@ -846,7 +1019,7 @@ describe('BuildErrorPatch', () => {
       nodes: { CONFIG: cfg },
     });
     assert.equal(out.json.patch.custom_fields[cfg.f_icp_scored_at], '2026-09-09');
-    assert.equal(out.json.patch.custom_fields[cfg.f_icp_model_version], 'v5');
+    assert.equal(out.json.patch.custom_fields[cfg.f_icp_model_version], 'v6');
   });
 
   test('it never writes ICP Final', () => {

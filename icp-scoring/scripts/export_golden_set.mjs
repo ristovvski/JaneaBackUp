@@ -23,7 +23,7 @@ import { dirname, join, basename } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'tests', 'golden', 'expected.json');
-const RUBRIC = JSON.parse(readFileSync(join(ROOT, 'config', 'rubric_v5.json'), 'utf8'));
+const RUBRIC = JSON.parse(readFileSync(join(ROOT, 'config', 'rubric_v6.json'), 'utf8'));
 
 const csvPath = process.argv[2] || process.env.ICP_TEST_ACCOUNTS_CSV || null;
 

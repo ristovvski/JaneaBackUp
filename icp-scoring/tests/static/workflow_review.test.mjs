@@ -237,7 +237,7 @@ describe('CONFIG is first, and holds everything', () => {
     );
   });
 
-  test('the four instance-specific values are resolved, never literals', () => {
+  test('the instance-specific values are resolved, never literals', () => {
     const expression = byName.get('CONFIG').parameters.jsonOutput;
     for (const [key, envKey] of Object.entries(ENV_KEYS)) {
       assert.ok(
@@ -253,9 +253,9 @@ describe('CONFIG is first, and holds everything', () => {
     assert.ok(expression.includes('const BAKED ='), 'must carry a build-time fallback');
 
     // A Clay webhook URL is an unguessable endpoint, i.e. a secret. A build
-    // with ICP_CLAY_WEBHOOK_URL set legitimately bakes it into the GITIGNORED
+    // with ICP_CLAY_ENGINE_URL set legitimately bakes it into the GITIGNORED
     // export; a build without it must contain no trace.
-    if (!process.env.ICP_CLAY_WEBHOOK_URL) {
+    if (!process.env.ICP_CLAY_ENGINE_URL) {
       assert.ok(!/api\.clay\.com|hooks\.clay\.com/.test(raw), 'no literal Clay URL in a placeholder build');
     }
   });
@@ -332,9 +332,11 @@ describe('no literal ids or secrets outside CONFIG', () => {
     }
     // No clay_webhook_secret and no icp_webhook_basic: both webhooks run on
     // the unguessable path as their only control, so neither carries one.
+    // No gsheets_audit: the audit store is an n8n Data Table, which needs no
+    // credential at all.
     assert.deepEqual(
       [...seen].sort(),
-      ['gsheets_audit', 'pipedrive_main', 'slack_ops']
+      ['pipedrive_main', 'slack_ops']
     );
   });
 });

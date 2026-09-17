@@ -33,7 +33,9 @@
     "gen:python": "node scripts/gen_clay_python.mjs",
     "gen:openai": "node scripts/gen_openai_schemas.mjs",
     "clay:build": "node clay/build_workflow.mjs",
-    "clay:export": "node clay/export_run.mjs"
+    "clay:export": "node clay/export_run.mjs",
+    "audit:table": "node scripts/audit_table.mjs",
+    "gen:fixtures": "node scripts/gen_fixtures.mjs"
   },
   "dependencies": {
     "ajv": "^8.17.1",

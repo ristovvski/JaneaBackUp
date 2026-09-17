@@ -140,16 +140,16 @@ describe('S3 activation state defaulting', () => {
     const result = score(baseInput({ activation_state: null }));
     assert.equal(result.activation_state_used, RUBRIC.activation_default_when_no_evidence);
     assert.equal(result.activation_state_used, 'Stable');
-    assert.equal(result.multiplier, 0.85);
+    assert.equal(result.multiplier, 0.8);
   });
 });
 
 describe('S4 final scores', () => {
   test('final = round_half_up(composite * multiplier)', () => {
-    const input = baseInput({ activation_state: 'Stable' }); // composite 100 * 0.85
+    const input = baseInput({ activation_state: 'Stable' }); // composite 100 * 0.80
     const result = score(input);
     assert.equal(result.composite, 100);
-    assert.equal(result.final_score, 85);
+    assert.equal(result.final_score, 80);
   });
 
   test('final_without_activation = round_half_up(composite), multiplier ignored', () => {
@@ -157,7 +157,7 @@ describe('S4 final scores', () => {
     const result = score(input);
     assert.equal(result.composite, 92.5);
     assert.equal(result.final_score_without_activation, 93);
-    assert.equal(result.final_score, 79); // 92.5 * 0.85 = 78.625 -> 79
+    assert.equal(result.final_score, 74); // 92.5 * 0.80 = 74.0 -> 74
   });
 
   test('Contracting multiplier 0 zeroes the final but not the without-activation score', () => {
@@ -372,7 +372,7 @@ describe('S9 Contracting requires dated evidence', () => {
   test('Contracting with no evidence date downgrades to Stable and flags it', () => {
     const result = score(baseInput({ activation_state: 'Contracting' }));
     assert.equal(result.activation_state_used, 'Stable');
-    assert.equal(result.multiplier, 0.85);
+    assert.equal(result.multiplier, 0.8);
     assert.ok(result.flags.includes('contracting_without_dated_evidence'));
   });
 
@@ -457,7 +457,7 @@ describe('S11 a rubric whose weights do not sum to 100 cannot load', () => {
 
     const bad = structuredClone(RUBRIC);
     bad.weights.geography = 11; // 101 total
-    writeFileSync(join(dir, 'config', 'rubric_v5.json'), JSON.stringify(bad));
+    writeFileSync(join(dir, 'config', 'rubric_v6.json'), JSON.stringify(bad));
 
     await assert.rejects(
       () => import(pathToFileURL(join(dir, 'engine', 'scoring.mjs')).href),
@@ -507,9 +507,31 @@ describe('output contract', () => {
     ]);
   });
 
-  test('model_version comes from config and is v5', () => {
-    assert.equal(score(baseInput()).model_version, 'v5');
-    assert.equal(RUBRIC.model_version, 'v5');
+  test('model_version comes from config and is v6', () => {
+    assert.equal(score(baseInput()).model_version, 'v6');
+    assert.equal(RUBRIC.model_version, 'v6');
+  });
+
+  test('the v6 activation multipliers are 1.00 / 0.95 / 0.80 / 0.00', () => {
+    // v5 gave Transitioning the same 1.00 as Accelerating and Stable 0.85.
+    // v6 separates all four, so a Transitioning account is no longer scored as
+    // if it were accelerating. Pinned here because these four numbers move
+    // every grade on the board.
+    assert.deepEqual(RUBRIC.activation_multipliers, {
+      Accelerating: 1,
+      Transitioning: 0.95,
+      Stable: 0.8,
+      Contracting: 0,
+    });
+  });
+
+  test('an unknown vertical scores 0 and says so', () => {
+    const result = score(baseInput({ industry_vertical: 'Interplanetary Logistics' }));
+    assert.equal(result.industry_level, 0);
+    assert.equal(result.levels_used.industry, 0);
+    assert.ok(result.flags.includes('unknown_vertical'));
+    // The rubric states the rule rather than leaving it to this implementation.
+    assert.deepEqual(RUBRIC.unknown_vertical_rule, { level: 0, flag: 'unknown_vertical', confidence: 'low' });
   });
 
   test('an out-of-range level is rejected rather than silently scored', () => {

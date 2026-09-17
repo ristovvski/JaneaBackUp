@@ -1,64 +1,103 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://janeasystems.com/icp/icp_scored_event.schema.json",
-  "title": "icp.scored event",
-  "description": "What the Clay `post_to_n8n` HTTP column POSTs to n8n Path B. Everything the org patch, the note (§8.3) and the audit row (§8.4) need is here, so Path B never has to re-enrich or re-score from scratch. `additionalProperties: false` throughout: an unexpected key means Clay changed and we want to hear about it loudly, at the boundary.",
+  "title": "icp.scored event (v6, consolidated)",
+  "description": "What the Clay ICP table POSTs to n8n Path B. v6 replaces v5's seven per-classifier objects with one consolidated event: four classifiers survive under `cls_all`, and geography, revenue_range and buying_signal arrive already levelled inside `score`. n8n therefore no longer re-derives a score of its own — it validates this one for internal consistency against the rubric and rejects on mismatch. `additionalProperties: false` throughout, with one deliberate exception: a short allow-list of provenance keys (`event`, `event_id`, `emitted_at`, `clay_table`, `clay_row_url`) may be present and is ignored, because they carry no scoring weight and their absence must not be a contract break.",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "event", "event_id", "request_id", "emitted_at", "model_version",
-    "org_id", "identifier_kind", "identifier_value", "components", "score", "facts_summary"
+    "request_id", "org_id", "identifier_kind", "identifier_value",
+    "resolved", "cls_all", "jobs", "score", "apollo_summary", "model_version"
   ],
   "properties": {
-    "event":       { "const": "icp.scored" },
-    "event_id":    { "type": "string", "minLength": 8, "description": "Clay row-run id; the Path B dedupe key" },
-    "request_id":  { "type": "string", "minLength": 1, "description": "the n8n correlation id issued on Path A" },
-    "emitted_at":  { "type": "string", "minLength": 10, "description": "ISO 8601" },
-    "model_version": { "const": "v5" },
-
-    "org_id":  { "type": "string", "minLength": 1 },
-    "deal_id": { "type": ["string", "null"] },
+    "request_id": { "type": "string", "minLength": 1, "description": "the n8n correlation id issued on Path A; the Path B dedupe key" },
+    "org_id":     { "type": "string", "minLength": 1 },
+    "deal_id":    { "type": ["string", "null"] },
 
     "identifier_kind":  { "enum": ["domain", "linkedin", "name"] },
     "identifier_value": { "type": "string", "minLength": 1 },
 
-    "components": {
+    "resolved": {
+      "description": "What the table actually resolved the identifier to. Path B fills the org's website and LinkedIn URL from here when they are empty, which is how a name-only org acquires them.",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "industry_vertical", "stage_maturity", "company_type",
-        "geography", "revenue_range", "activation_state", "buying_signal"
-      ],
+      "required": ["domain", "linkedin_url", "website"],
       "properties": {
-        "industry_vertical": { "$ref": "#/definitions/component" },
-        "stage_maturity":    { "$ref": "#/definitions/component" },
-        "company_type":      { "$ref": "#/definitions/component" },
-        "geography":         { "$ref": "#/definitions/component" },
-        "revenue_range":     { "$ref": "#/definitions/component" },
-        "activation_state":  { "$ref": "#/definitions/component" },
-        "buying_signal":     { "$ref": "#/definitions/component" }
+        "domain":       { "type": ["string", "null"] },
+        "linkedin_url": { "type": ["string", "null"] },
+        "website":      { "type": ["string", "null"] }
+      }
+    },
+
+    "cls_all": {
+      "description": "The four components still decided by a classifier. Geography, revenue_range and buying_signal are computed by the table and appear only as levels inside `score`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["industry_vertical", "company_type", "stage_maturity", "activation_state"],
+      "properties": {
+        "industry_vertical": {
+          "allOf": [{ "$ref": "#/definitions/classifier" }],
+          "properties": { "value": { "type": ["string", "null"] } },
+          "required": ["value"]
+        },
+        "company_type":   { "$ref": "#/definitions/levelled" },
+        "stage_maturity": { "$ref": "#/definitions/levelled" },
+        "activation_state": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value", "evidence", "confidence", "missing_inputs"],
+          "properties": {
+            "value": { "oneOf": [{ "enum": ["Accelerating", "Transitioning", "Stable", "Contracting"] }, { "type": "null" }] },
+            "evidence": { "$ref": "#/definitions/evidence" },
+            "activation_evidence_dated": {
+              "description": "Whether the evidence behind a Contracting call is dated. The rubric downgrades an undated Contracting to the default state.",
+              "type": ["boolean", "null"]
+            },
+            "confidence": { "enum": ["high", "medium", "low"] },
+            "missing_inputs": { "$ref": "#/definitions/missing" }
+          }
+        },
+        "conflict_note": {
+          "description": "Free text from the table when two sources disagreed. Carried into the note, never into the score.",
+          "type": ["string", "null"]
+        }
+      }
+    },
+
+    "jobs": {
+      "description": "The hiring picture behind stage_maturity and buying_signal. Reference data: every field may be null when the jobs provider returned nothing, and a null here is not the same as a zero.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eng_open", "eng_open_60d_plus", "has_eng_leader", "eng_leader_titles", "eng_open_ratio", "eng_headcount", "dates_available", "eng_titles", "as_of"],
+      "properties": {
+        "eng_open":          { "type": ["integer", "null"], "minimum": 0 },
+        "eng_open_60d_plus": { "type": ["integer", "null"], "minimum": 0 },
+        "has_eng_leader":    { "type": ["boolean", "null"] },
+        "eng_leader_titles": { "type": "array", "items": { "type": "string" } },
+        "eng_open_ratio":    { "type": ["number", "null"], "minimum": 0 },
+        "eng_headcount":     { "type": ["integer", "null"], "minimum": 0 },
+        "dates_available":   { "type": ["boolean", "null"] },
+        "eng_titles":        { "type": "array", "items": { "type": "string" } },
+        "as_of":             { "type": ["string", "null"] }
       }
     },
 
     "score": {
+      "description": "Computed by the table. n8n validates this block against the rubric — weights sum, composite arithmetic, multiplier, rounding, grade thresholds — and rejects the event on any mismatch rather than substituting a number of its own.",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "model_version", "industry_level", "levels_used", "composite",
-        "activation_state_used", "multiplier", "final_score",
-        "final_score_without_activation", "grade", "status",
+        "levels", "composite", "activation_state_used", "multiplier",
+        "final_score", "final_score_without_activation", "grade", "status",
         "confidence_overall", "tier2_candidate", "flags"
       ],
       "properties": {
-        "model_version":  { "const": "v5" },
-        "industry_level": { "enum": [0, 3, 7, 10] },
-        "industry_tier":  { "type": ["string", "null"], "enum": ["Anchor", "Watch", "Opportunistic", "Out", null] },
-        "levels_used": {
+        "levels": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["industry", "stage_maturity", "company_type", "geography", "revenue_range", "buying_signal"],
+          "required": ["industries", "stage_maturity", "company_type", "geography", "revenue_range", "buying_signal"],
           "properties": {
-            "industry":       { "enum": [0, 3, 7, 10] },
+            "industries":     { "enum": [0, 3, 7, 10] },
             "stage_maturity": { "enum": [0, 3, 7, 10] },
             "company_type":   { "enum": [0, 3, 7, 10] },
             "geography":      { "enum": [0, 3, 7, 10] },
@@ -66,10 +105,9 @@
             "buying_signal":  { "enum": [0, 3, 7, 10] }
           }
         },
-        "buying_signal_level": { "oneOf": [{ "enum": [0, 3, 7, 10] }, { "type": "null" }] },
         "composite":             { "type": "number", "minimum": 0, "maximum": 100 },
         "activation_state_used": { "enum": ["Accelerating", "Transitioning", "Stable", "Contracting"] },
-        "multiplier":            { "enum": [0, 0.85, 1] },
+        "multiplier":            { "enum": [0, 0.8, 0.95, 1] },
         "final_score":                    { "type": "integer", "minimum": 0, "maximum": 100 },
         "final_score_without_activation": { "type": "integer", "minimum": 0, "maximum": 100 },
         "grade":  { "oneOf": [{ "enum": ["A", "B", "C"] }, { "type": "null" }] },
@@ -80,43 +118,67 @@
       }
     },
 
-    "facts_summary": {
+    "apollo_summary": {
+      "description": "The firmographic reading the levels were taken from. Reference only — nothing here is re-levelled by n8n.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["revenue_usd", "headcount_total", "headcount_eng"],
+      "required": ["employees", "eng_headcount", "country", "state", "founded_year", "last_round_date", "revenue_band_used", "revenue_source"],
       "properties": {
-        "revenue_usd":     { "type": ["number", "null"], "minimum": 0 },
-        "headcount_total": { "type": ["integer", "null"], "minimum": 0 },
-        "headcount_eng":   { "type": ["integer", "null"], "minimum": 0 }
+        "employees":         { "type": ["integer", "null"], "minimum": 0 },
+        "eng_headcount":     { "type": ["integer", "null"], "minimum": 0 },
+        "country":           { "type": ["string", "null"] },
+        "state":             { "type": ["string", "null"] },
+        "founded_year":      { "type": ["integer", "null"] },
+        "last_round_date":   { "type": ["string", "null"] },
+        "revenue_band_used": { "type": ["string", "null"] },
+        "revenue_source":    { "type": ["string", "null"] }
       }
     },
 
-    "clay_table": { "type": ["string", "null"], "description": "source table name, for the audit trail" },
+    "model_version": { "const": "v6" },
+
+    "event":        { "description": "ignored; allowed so the table may send it", "type": ["string", "null"] },
+    "event_id":     { "description": "ignored for routing; sharpens the dedupe key when present", "type": ["string", "null"] },
+    "emitted_at":   { "description": "ignored; n8n stamps the audit row from its own clock", "type": ["string", "null"] },
+    "clay_table":   { "type": ["string", "null"] },
     "clay_row_url": { "type": ["string", "null"] }
   },
 
   "definitions": {
-    "component": {
+    "evidence": {
+      "description": "v5 capped this at 6 items of 200 characters because the classifier schema did. The table is not bound by that schema, and rejecting a whole scoring event over a seventh evidence string would be the wrong trade — the note and the audit row both trim. The bound is kept only to stop an unbounded payload.",
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 20
+    },
+    "missing": { "type": "array", "items": { "type": "string" } },
+    "classifier": {
       "type": "object",
       "additionalProperties": false,
       "required": ["value", "evidence", "confidence", "missing_inputs"],
       "properties": {
-        "value": { "oneOf": [{ "enum": [0, 3, 7, 10] }, { "type": "string" }, { "type": "null" }] },
-        "evidence": { "type": "array", "items": { "type": "string", "maxLength": 200 }, "maxItems": 6 },
+        "value": {},
+        "evidence": { "$ref": "#/definitions/evidence" },
         "confidence": { "enum": ["high", "medium", "low"] },
-        "missing_inputs": { "type": "array", "items": { "type": "string" } },
-        "evidence_dated_within_months": { "type": ["integer", "null"] }
+        "missing_inputs": { "$ref": "#/definitions/missing" }
       }
     },
-
-    "grade_null_when_insufficient": {
-      "comment": "Enforced by schemas.test.mjs rather than by JSON Schema: status insufficient_data implies grade null, and vice versa."
+    "levelled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "evidence", "confidence", "missing_inputs"],
+      "properties": {
+        "level": { "oneOf": [{ "enum": [0, 3, 7, 10] }, { "type": "null" }] },
+        "evidence": { "$ref": "#/definitions/evidence" },
+        "confidence": { "enum": ["high", "medium", "low"] },
+        "missing_inputs": { "$ref": "#/definitions/missing" }
+      }
     }
   },
 
   "allOf": [
     {
-      "comment": "insufficient_data and a grade are mutually exclusive (S6).",
+      "comment": "insufficient_data and a grade are mutually exclusive.",
       "if": { "properties": { "score": { "properties": { "status": { "const": "insufficient_data" } }, "required": ["status"] } }, "required": ["score"] },
       "then": { "properties": { "score": { "properties": { "grade": { "type": "null" } } } } }
     },

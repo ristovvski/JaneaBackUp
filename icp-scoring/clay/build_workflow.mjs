@@ -6,7 +6,7 @@
  * the Workflow primitive instead of a table: webhook in from n8n Path A,
  * enrichment waterfall, seven classifiers, the v5 score, `icp.scored` out to
  * n8n Path B. Everything it needs comes from tracked sources — the seven prompt
- * files, the three schemas, config/rubric_v5.json and the parity-tested Python
+ * files, the three schemas, config/rubric_v6.json and the parity-tested Python
  * scorer — so a rubric change is a regenerate-and-rerun, not a UI safari.
  *
  * Idempotent: nodes are matched to the live graph BY NAME, so re-running
@@ -128,13 +128,13 @@ function clay(args, payload) {
 // Sources
 // ---------------------------------------------------------------------------
 
-const RUBRIC = JSON.parse(read('config/rubric_v5.json'));
+const RUBRIC = JSON.parse(read('config/rubric_v6.json'));
 const PREAMBLE = read('engine/prompts/_preamble.md');
 const SCORER = read('engine/clay_score.py');
 
 const VERTICALS = Object.keys(RUBRIC.industry_verticals ?? {});
 if (VERTICALS.length !== 17) {
-  throw new Error(`expected 17 verticals in config/rubric_v5.json, found ${VERTICALS.length}`);
+  throw new Error(`expected 17 verticals in config/rubric_v6.json, found ${VERTICALS.length}`);
 }
 const ACTIVATION_STATES = Object.keys(RUBRIC.activation_multipliers ?? {});
 if (ACTIVATION_STATES.length !== 4) {

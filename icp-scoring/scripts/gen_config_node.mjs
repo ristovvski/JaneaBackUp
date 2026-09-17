@@ -2,26 +2,25 @@
 // scripts/gen_config_node.mjs — write n8n/nodes/CONFIG.json.
 //
 // CONFIG is the one node that holds every id, key, option id, window and
-// rubric constant. Because it is generated from config/rubric_v5.json and
+// rubric constant. Because it is generated from config/rubric_v6.json and
 // config/pipedrive_fields.json, a field key or a threshold cannot be typed
 // into a node by hand — which is what makes the static test "no literal
 // Pipedrive field hashes outside CONFIG" enforceable rather than aspirational.
 //
 // Run: npm run gen:config   (after every pipedrive_create_fields run)
 //
-// The four environment-specific values are NOT in this file. A Clay webhook
+// The three environment-specific values are NOT in this file. A Clay webhook
 // URL is an unguessable endpoint, so it is a secret, and invariant 1 forbids
 // secrets in any file. They are spliced into the Set node's jsonOutput
 // expression from $env at runtime:
-//     ICP_CLAY_WEBHOOK_URL, ICP_CLAY_CALLBACK_URL,
-//     ICP_AUDIT_SHEET_ID,   ICP_SLACK_CHANNEL
+//     ICP_CLAY_ENGINE_URL, ICP_CLAY_CALLBACK_URL, ICP_SLACK_CHANNEL
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const RUBRIC = JSON.parse(readFileSync(join(ROOT, 'config', 'rubric_v5.json'), 'utf8'));
+const RUBRIC = JSON.parse(readFileSync(join(ROOT, 'config', 'rubric_v6.json'), 'utf8'));
 // Prefer the live registry a create_fields run produced; fall back to the
 // committed placeholder template so a fresh clone can still build and test.
 const FIELDS_LOCAL = join(ROOT, 'config', 'pipedrive_fields.local.json');
@@ -29,10 +28,14 @@ const FIELDS_TEMPLATE = join(ROOT, 'config', 'pipedrive_fields.json');
 const FIELDS_PATH = existsSync(FIELDS_LOCAL) ? FIELDS_LOCAL : FIELDS_TEMPLATE;
 const FIELDS = JSON.parse(readFileSync(FIELDS_PATH, 'utf8'));
 
+// Three values, not four. The audit store moved from a Google Sheet to an n8n
+// Data Table, and a table NAME is neither a secret nor environment-specific —
+// it is a plain constant below. `clay_engine_url` is the v6 name for what v5
+// called clay_webhook_url: it now points at the ICP table's webhook source
+// rather than at the retired Clay Workflow trigger.
 export const ENV_KEYS = {
-  clay_webhook_url: 'ICP_CLAY_WEBHOOK_URL',
+  clay_engine_url: 'ICP_CLAY_ENGINE_URL',
   clay_callback_url: 'ICP_CLAY_CALLBACK_URL',
-  audit_sheet_id: 'ICP_AUDIT_SHEET_ID',
   slack_channel_ops: 'ICP_SLACK_CHANNEL',
 };
 
@@ -59,7 +62,7 @@ export function buildConfig() {
   return {
     // --- provenance ------------------------------------------------------
     _generated_by: 'scripts/gen_config_node.mjs',
-    _sources: ['config/rubric_v5.json', 'config/pipedrive_fields.json'],
+    _sources: ['config/rubric_v6.json', 'config/pipedrive_fields.json'],
     _field_registry_status: FIELDS.status,
 
     // --- rubric constants ------------------------------------------------
@@ -78,6 +81,19 @@ export function buildConfig() {
     component_scales: RUBRIC.component_scales,
     vertical_tier: Object.fromEntries(
       Object.entries(RUBRIC.industry_verticals).map(([name, row]) => [name, row.tier])
+    ),
+    // vertical -> level, resolved through the tier map here rather than in the
+    // node. ParseScored checks the posted industry level against this, which is
+    // how a stale vertical map in the Clay table gets caught at the boundary
+    // instead of quietly grading an Anchor account as Opportunistic.
+    vertical_level: Object.fromEntries(
+      Object.entries(RUBRIC.industry_verticals).map(([name, row]) => {
+        const level = RUBRIC.industry_vertical_map[row.tier];
+        if (level === undefined) {
+          throw new Error(`rubric: vertical "${name}" has tier "${row.tier}", absent from industry_vertical_map`);
+        }
+        return [name, level];
+      })
     ),
 
     // --- Pipedrive field keys --------------------------------------------
@@ -110,6 +126,11 @@ export function buildConfig() {
     note_max_chars: 1500,
 
     // --- expected shapes -------------------------------------------------
+    // The n8n Data Table the audit row is appended to. A name, not an id: the
+    // Data Table node resolves either, and a name survives a table being
+    // recreated in a way an id does not.
+    audit_data_table: 'icp_audit',
+
     trigger_entity: 'deal',
     trigger_action: 'create',
     clay_event_name: 'icp.scored',

@@ -1,74 +1,268 @@
 {
+  "superseded_by": "rubric_v6.json",
   "model_version": "v5",
-  "weights": { "industries": 15, "stage_maturity": 25, "revenue_range": 25, "company_type": 25, "geography": 10, "buying_signal": 0 },
-  "levels": [0, 3, 7, 10],
-  "thresholds": { "A": 75, "B": 55 },
-  "grade_labels": { "A": "ICP A", "B": "ICP B", "C": "ICP C" },
+  "weights": {
+    "industries": 15,
+    "stage_maturity": 25,
+    "revenue_range": 25,
+    "company_type": 25,
+    "geography": 10,
+    "buying_signal": 0
+  },
+  "levels": [
+    0,
+    3,
+    7,
+    10
+  ],
+  "thresholds": {
+    "A": 75,
+    "B": 55
+  },
+  "grade_labels": {
+    "A": "ICP A",
+    "B": "ICP B",
+    "C": "ICP C"
+  },
   "rounding": "half_up_to_integer",
-  "activation_multipliers": { "Accelerating": 1.00, "Transitioning": 1.00, "Stable": 0.85, "Contracting": 0.00 },
+  "activation_multipliers": {
+    "Accelerating": 1.0,
+    "Transitioning": 1.0,
+    "Stable": 0.85,
+    "Contracting": 0.0
+  },
   "activation_default_when_no_evidence": "Stable",
   "activation_contracting_evidence_max_age_months": 12,
-  "insufficient_data_rule": { "components": ["stage_maturity", "revenue_range", "company_type"], "trigger": "no_evidence_or_confidence_low" },
-  "tier2_flag_rule": { "revenue_usd_gt": 500000000, "headcount_gt": 1000, "company_type_level_eq": 7 },
+  "insufficient_data_rule": {
+    "components": [
+      "stage_maturity",
+      "revenue_range",
+      "company_type"
+    ],
+    "trigger": "no_evidence_or_confidence_low"
+  },
+  "tier2_flag_rule": {
+    "revenue_usd_gt": 500000000,
+    "headcount_gt": 1000,
+    "company_type_level_eq": 7
+  },
   "industry_vertical_map": {
-    "Anchor": 10, "Watch": 7, "Opportunistic": 3, "Out": 0,
-    "tier_thresholds": { "Anchor": 8, "Watch": 5, "Opportunistic": 3 }
+    "Anchor": 10,
+    "Watch": 7,
+    "Opportunistic": 3,
+    "Out": 0,
+    "tier_thresholds": {
+      "Anchor": 8,
+      "Watch": 5,
+      "Opportunistic": 3
+    }
   },
   "industry_verticals": {
-    "FinTech":                           { "win": 3, "capability": 2, "team_domain": 2, "market": 2, "engagement": 1, "total": 10, "tier": "Anchor", "note": "Akuvo, QCash, InvoiceCloud, Alloya" },
-    "HealthTech / MedTech":              { "win": 2, "capability": 2, "team_domain": 1, "market": 2, "engagement": 1, "total": 8,  "tier": "Anchor", "note": "LumaMDX" },
-    "SportsTech":                        { "win": 2, "capability": 1, "team_domain": 0, "market": 1, "engagement": 1, "total": 5,  "tier": "Watch",  "note": "Sumersports" },
-    "Analytics / ML":                    { "win": 0, "capability": 1, "team_domain": 1, "market": 2, "engagement": 1, "total": 5,  "tier": "Watch",  "note": "strong technical fit, no named wins" },
-    "Data Platform SaaS":                { "win": 0, "capability": 1, "team_domain": 1, "market": 2, "engagement": 1, "total": 5,  "tier": "Watch",  "note": "adjacent capability, no named wins" },
-    "SaaS — Other":                      { "win": 1, "capability": 1, "team_domain": 1, "market": 1, "engagement": 1, "total": 5,  "tier": "Watch",  "note": "Formstack, Intellistack" },
-    "Manufacturing tech / Industrial IoT": { "win": 0, "capability": 1, "team_domain": 0, "market": 1, "engagement": 1, "total": 3, "tier": "Opportunistic", "note": "Mike flagged; no proof" },
-    "Enterprise Tech / Hyperscalers":    { "win": 3, "capability": 2, "team_domain": 1, "market": 2, "engagement": 1, "total": 9,  "tier": "Anchor", "note": "Microsoft — Tier 2 path; composite gates it out", "tier2_path": true },
-    "Pharma / Life Sciences":            { "win": 3, "capability": 2, "team_domain": 0, "market": 1, "engagement": 1, "total": 7,  "tier": "Watch",  "note": "Merck — Tier 2 path", "tier2_path": true },
-    "EdTech":                            { "win": 0, "capability": 0, "team_domain": 0, "market": 1, "engagement": 1, "total": 2,  "tier": "Out" },
-    "LegalTech":                         { "win": 0, "capability": 0, "team_domain": 0, "market": 1, "engagement": 1, "total": 2,  "tier": "Out" },
-    "ClimaTech":                         { "win": 0, "capability": 0, "team_domain": 0, "market": 2, "engagement": 1, "total": 3,  "tier": "Opportunistic" },
-    "Government / Public Sector":        { "win": 0, "capability": 0, "team_domain": 0, "market": 0, "engagement": 0, "total": 0,  "tier": "Out", "note": "procurement barriers" },
-    "Pure Hardware / Consumer Electronics": { "win": 0, "capability": 0, "team_domain": 0, "market": 0, "engagement": 0, "total": 0, "tier": "Out" },
-    "Telecom / 5G Infrastructure":       { "win": 0, "capability": 0, "team_domain": 0, "market": 0, "engagement": 0, "total": 0,  "tier": "Out", "note": "enterprise dominant" },
-    "E-commerce / Retail Tech":          { "win": 0, "capability": 0, "team_domain": 0, "market": 0, "engagement": 0, "total": 0,  "tier": "Out", "note": "commoditized engineering" },
-    "Pre-product Startups":              { "win": 0, "capability": 0, "team_domain": 0, "market": 1, "engagement": 0, "total": 1,  "tier": "Out", "note": "no engineering org / budget" }
+    "FinTech": {
+      "win": 3,
+      "capability": 2,
+      "team_domain": 2,
+      "market": 2,
+      "engagement": 1,
+      "total": 10,
+      "tier": "Anchor",
+      "note": "Akuvo, QCash, InvoiceCloud, Alloya"
+    },
+    "HealthTech / MedTech": {
+      "win": 2,
+      "capability": 2,
+      "team_domain": 1,
+      "market": 2,
+      "engagement": 1,
+      "total": 8,
+      "tier": "Anchor",
+      "note": "LumaMDX"
+    },
+    "SportsTech": {
+      "win": 2,
+      "capability": 1,
+      "team_domain": 0,
+      "market": 1,
+      "engagement": 1,
+      "total": 5,
+      "tier": "Watch",
+      "note": "Sumersports"
+    },
+    "Analytics / ML": {
+      "win": 0,
+      "capability": 1,
+      "team_domain": 1,
+      "market": 2,
+      "engagement": 1,
+      "total": 5,
+      "tier": "Watch",
+      "note": "strong technical fit, no named wins"
+    },
+    "Data Platform SaaS": {
+      "win": 0,
+      "capability": 1,
+      "team_domain": 1,
+      "market": 2,
+      "engagement": 1,
+      "total": 5,
+      "tier": "Watch",
+      "note": "adjacent capability, no named wins"
+    },
+    "SaaS — Other": {
+      "win": 1,
+      "capability": 1,
+      "team_domain": 1,
+      "market": 1,
+      "engagement": 1,
+      "total": 5,
+      "tier": "Watch",
+      "note": "Formstack, Intellistack"
+    },
+    "Manufacturing tech / Industrial IoT": {
+      "win": 0,
+      "capability": 1,
+      "team_domain": 0,
+      "market": 1,
+      "engagement": 1,
+      "total": 3,
+      "tier": "Opportunistic",
+      "note": "Mike flagged; no proof"
+    },
+    "Enterprise Tech / Hyperscalers": {
+      "win": 3,
+      "capability": 2,
+      "team_domain": 1,
+      "market": 2,
+      "engagement": 1,
+      "total": 9,
+      "tier": "Anchor",
+      "note": "Microsoft — Tier 2 path; composite gates it out",
+      "tier2_path": true
+    },
+    "Pharma / Life Sciences": {
+      "win": 3,
+      "capability": 2,
+      "team_domain": 0,
+      "market": 1,
+      "engagement": 1,
+      "total": 7,
+      "tier": "Watch",
+      "note": "Merck — Tier 2 path",
+      "tier2_path": true
+    },
+    "EdTech": {
+      "win": 0,
+      "capability": 0,
+      "team_domain": 0,
+      "market": 1,
+      "engagement": 1,
+      "total": 2,
+      "tier": "Out"
+    },
+    "LegalTech": {
+      "win": 0,
+      "capability": 0,
+      "team_domain": 0,
+      "market": 1,
+      "engagement": 1,
+      "total": 2,
+      "tier": "Out"
+    },
+    "ClimaTech": {
+      "win": 0,
+      "capability": 0,
+      "team_domain": 0,
+      "market": 2,
+      "engagement": 1,
+      "total": 3,
+      "tier": "Opportunistic"
+    },
+    "Government / Public Sector": {
+      "win": 0,
+      "capability": 0,
+      "team_domain": 0,
+      "market": 0,
+      "engagement": 0,
+      "total": 0,
+      "tier": "Out",
+      "note": "procurement barriers"
+    },
+    "Pure Hardware / Consumer Electronics": {
+      "win": 0,
+      "capability": 0,
+      "team_domain": 0,
+      "market": 0,
+      "engagement": 0,
+      "total": 0,
+      "tier": "Out"
+    },
+    "Telecom / 5G Infrastructure": {
+      "win": 0,
+      "capability": 0,
+      "team_domain": 0,
+      "market": 0,
+      "engagement": 0,
+      "total": 0,
+      "tier": "Out",
+      "note": "enterprise dominant"
+    },
+    "E-commerce / Retail Tech": {
+      "win": 0,
+      "capability": 0,
+      "team_domain": 0,
+      "market": 0,
+      "engagement": 0,
+      "total": 0,
+      "tier": "Out",
+      "note": "commoditized engineering"
+    },
+    "Pre-product Startups": {
+      "win": 0,
+      "capability": 0,
+      "team_domain": 0,
+      "market": 1,
+      "engagement": 0,
+      "total": 1,
+      "tier": "Out",
+      "note": "no engineering org / budget"
+    }
   },
   "component_scales": {
     "stage_maturity": {
       "10": "Series B–D growth, limited internal capacity, active investment + roadmap commitments",
-      "7":  "Series A or mature steady-state with documented capacity gaps",
-      "3":  "Pre-Series B with engineering still consolidating; OR mature steady-state without acute pressure",
-      "0":  "Pre-product, no funded engineering org, OR fully self-sufficient enterprise"
+      "7": "Series A or mature steady-state with documented capacity gaps",
+      "3": "Pre-Series B with engineering still consolidating; OR mature steady-state without acute pressure",
+      "0": "Pre-product, no funded engineering org, OR fully self-sufficient enterprise"
     },
     "company_type": {
       "10": "Software-native (SaaS, data platform, software-as-core-product)",
-      "7":  "Software-Dependent — mission-critical custom software as core function (e.g., Merck, regulated industries)",
-      "3":  "Software-integrated / embedded device companies (hardware-led with significant software layer)",
-      "0":  "Pure hardware OR IT-led (no engineering org owning product software)"
+      "7": "Software-Dependent — mission-critical custom software as core function (e.g., Merck, regulated industries)",
+      "3": "Software-integrated / embedded device companies (hardware-led with significant software layer)",
+      "0": "Pure hardware OR IT-led (no engineering org owning product software)"
     },
     "geography": {
       "10": "US-based",
-      "7":  "Canada + Western Europe",
-      "3":  "English-speaking market outside network reach (AU, NZ, Singapore, UK)",
-      "0":  "Non-network, non-English-speaking, or jurisdictionally hard market"
+      "7": "Canada + Western Europe",
+      "3": "English-speaking market outside network reach (AU, NZ, Singapore, UK)",
+      "0": "Non-network, non-English-speaking, or jurisdictionally hard market"
     },
     "revenue_range": {
       "10": "$25M–$500M (defined CFO/CRO/CIO, budget calendars, established procurement)",
-      "7":  "$10M–$25M (workable but less buyer infrastructure)",
-      "3":  "Under $10M OR over $500M (different motion required)",
-      "0":  "Pre-revenue OR enterprise > $1B (Tier 2 territory)"
+      "7": "$10M–$25M (workable but less buyer infrastructure)",
+      "3": "Under $10M OR over $500M (different motion required)",
+      "0": "Pre-revenue OR enterprise > $1B (Tier 2 territory)"
     },
     "activation_state": {
-      "Accelerating":  "Raising capital, scaling team, public roadmap commitments, new capability hires",
+      "Accelerating": "Raising capital, scaling team, public roadmap commitments, new capability hires",
       "Transitioning": "Re-platforming, post-funding inflection, new CTO/VP Eng, restructuring engineering",
-      "Stable":        "Steady-state, no acute transformation pressure",
-      "Contracting":   "Layoffs, hiring freeze, cost-cutting, declining metrics — requires dated evidence ≤ 12 months"
+      "Stable": "Steady-state, no acute transformation pressure",
+      "Contracting": "Layoffs, hiring freeze, cost-cutting, declining metrics — requires dated evidence ≤ 12 months"
     },
     "buying_signal": {
       "10": "Compound signal: concentrated postings (Head of X + 5+ roles) AND funding event OR exec change AND tech-stack investment",
-      "7":  "Single strong signal: high-quality posting cluster, recent funding, or named champion connection",
-      "3":  "Weak / single-source signal (one posting, generic engineering hire)",
-      "0":  "No detectable buying signal in the current window"
+      "7": "Single strong signal: high-quality posting cluster, recent funding, or named champion connection",
+      "3": "Weak / single-source signal (one posting, generic engineering hire)",
+      "0": "No detectable buying signal in the current window"
     }
   },
   "rescore_after_days": 180,

@@ -1,7 +1,7 @@
 // tests/contract/prompts.test.mjs — no rubric text is hardcoded in a prompt.
 //
 // The point of §9.2 is that changing a level definition is one edit to
-// config/rubric_v5.json. That only holds if every prompt carries the rubric
+// config/rubric_v6.json. That only holds if every prompt carries the rubric
 // text byte for byte and the generator has been re-run. Both are asserted
 // here, by reading the config — never by string literals in this file.
 
@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PROMPTS = join(ROOT, 'engine', 'prompts');
-const RUBRIC = JSON.parse(readFileSync(join(ROOT, 'config', 'rubric_v5.json'), 'utf8'));
+const RUBRIC = JSON.parse(readFileSync(join(ROOT, 'config', 'rubric_v6.json'), 'utf8'));
 
 const readPrompt = (name) => readFileSync(join(PROMPTS, `${name}.md`), 'utf8');
 

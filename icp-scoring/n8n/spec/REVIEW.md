@@ -68,7 +68,7 @@ and asserted by the replay fixture, whose only difference from the original is
 The signed rubric qualifies geography 10 and 7 with "within network reach" /
 "with network coverage". No enrichment fact expresses network reach, so the
 classifier scores by region alone. Recorded in three places so it cannot be
-forgotten: `config/rubric_v5.json` (`geography_rule_deviation`), the geography
+forgotten: `config/rubric_v6.json` (`geography_rule_deviation`), the geography
 prompt (a blockquote instructing the classifier not to infer coverage), and a
 contract test asserting the config note names the decision.
 

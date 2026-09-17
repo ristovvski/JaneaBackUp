@@ -1,11 +1,11 @@
 {
   "_generated_by": "scripts/gen_config_node.mjs",
   "_sources": [
-    "config/rubric_v5.json",
+    "config/rubric_v6.json",
     "config/pipedrive_fields.json"
   ],
   "_field_registry_status": "placeholder",
-  "model_version": "v5",
+  "model_version": "v6",
   "levels": [
     0,
     3,
@@ -31,8 +31,8 @@
   },
   "activation_multipliers": {
     "Accelerating": 1,
-    "Transitioning": 1,
-    "Stable": 0.85,
+    "Transitioning": 0.95,
+    "Stable": 0.8,
     "Contracting": 0
   },
   "activation_default": "Stable",
@@ -104,6 +104,25 @@
     "E-commerce / Retail Tech": "Out",
     "Pre-product Startups": "Out"
   },
+  "vertical_level": {
+    "FinTech": 10,
+    "HealthTech / MedTech": 10,
+    "SportsTech": 7,
+    "Analytics / ML": 7,
+    "Data Platform SaaS": 7,
+    "SaaS — Other": 7,
+    "Manufacturing tech / Industrial IoT": 3,
+    "Enterprise Tech / Hyperscalers": 10,
+    "Pharma / Life Sciences": 7,
+    "EdTech": 0,
+    "LegalTech": 0,
+    "ClimaTech": 3,
+    "Government / Public Sector": 0,
+    "Pure Hardware / Consumer Electronics": 0,
+    "Telecom / 5G Infrastructure": 0,
+    "E-commerce / Retail Tech": 0,
+    "Pre-product Startups": 0
+  },
   "f_icp_calculated": "PLACEHOLDER_icp_calculated_0000000000000000000000",
   "f_icp_score": "PLACEHOLDER_icp_score_000000000000000000000000000",
   "f_icp_scored_at": "PLACEHOLDER_icp_scored_at_00000000000000000000000",
@@ -126,6 +145,7 @@
   "dedupe_ttl_hours": 48,
   "max_events_per_hour": 200,
   "note_max_chars": 1500,
+  "audit_data_table": "icp_audit",
   "trigger_entity": "deal",
   "trigger_action": "create",
   "clay_event_name": "icp.scored"

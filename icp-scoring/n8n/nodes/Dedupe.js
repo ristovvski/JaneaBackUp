@@ -38,12 +38,25 @@ if (cfg === null || cfg === undefined) {
 
 // CONFIG is a raw-mode Set node, so it REPLACES the item: by the time we get
 // here $input holds the config object, not the payload. The body therefore has
-// to come from the webhook node itself. $('Name') throws when that node has not
-// run in this execution, which is exactly how we tell the two paths apart.
+// to come from the webhook node itself. $('Name') throws when that node is not
+// connected upstream of this one, and each copy of this node has exactly one
+// of the two webhooks above it — so which lookup succeeds IS which path this
+// is. That is the only path signal used: v5 read `event === "icp.scored"` out
+// of the body, and v6's consolidated event has no such key.
 let raw = null;
-try { raw = $('Webhook Pipedrive').item.json.body; } catch (e) { raw = null; }
-if (raw === null || raw === undefined) {
-  try { raw = $('Webhook Clay').item.json.body; } catch (e) { raw = null; }
+let path = null;
+try { raw = $('Webhook Pipedrive').item.json.body; path = 'A'; } catch (e) { raw = null; }
+if (path === null) {
+  try { raw = $('Webhook Clay').item.json.body; path = 'B'; } catch (e) { raw = null; }
+}
+if (path === null) {
+  // Neither webhook is upstream. That is a wiring fault, not a bad payload.
+  const error = new Error(
+    'ICP_NO_WEBHOOK_UPSTREAM: neither "Webhook Pipedrive" nor "Webhook Clay" is ' +
+    'connected above this node, so there is no way to tell which path this is'
+  );
+  error.name = 'IcpNoWebhookUpstream';
+  throw error;
 }
 if (raw === null || raw === undefined) raw = {};
 
@@ -53,39 +66,41 @@ const now = Date.now();
 // ---------------------------------------------------------------------------
 // Which path is this?
 // ---------------------------------------------------------------------------
-let path = null;
 let key = null;
 
-const meta = raw.meta;
-if (meta && meta.id !== undefined && meta.id !== null) {
-  path = 'A';
+if (path === 'A') {
+  const meta = raw.meta;
+  if (!meta || meta.id === undefined || meta.id === null) {
+    // The endpoint is unguessable, so an unrecognised body is not a passing
+    // scanner — it is a real delivery we do not understand, and staying quiet
+    // about it means an org silently never gets scored.
+    const error = new Error(
+      'ICP_UNKNOWN_PAYLOAD: the Pipedrive webhook delivered a body with no meta.id, ' +
+      'so there is no per-delivery id to dedupe on'
+    );
+    error.name = 'IcpUnknownPayload';
+    throw error;
+  }
   const dealId = meta.entity_id === undefined || meta.entity_id === null ? '' : String(meta.entity_id);
   key = `pipedrive:${meta.entity || 'unknown'}:${dealId}:${String(meta.id)}`;
-} else if (raw.event === cfg.clay_event_name) {
-  path = 'B';
+} else {
+  // request_id is issued by Path A, one per scoring request, and it is the
+  // only identity v6 guarantees. event_id is optional and sharpens the key
+  // when the table sends one: with it, a deliberate re-run of the same row is
+  // a new event; without it, a second callback for the same request_id is a
+  // duplicate and is written to the audit row as one rather than being scored
+  // twice.
   const requestId = raw.request_id === undefined || raw.request_id === null ? '' : String(raw.request_id);
-  const eventId = raw.event_id === undefined || raw.event_id === null ? '' : String(raw.event_id);
-  if (requestId === '' || eventId === '') {
-    // Without both halves the ledger key collides across every callback and
-    // would drop all of them after the first. Fail loudly instead.
+  if (requestId === '') {
     const error = new Error(
-      `ICP_MALFORMED_EVENT: ${cfg.clay_event_name} needs both request_id and event_id ` +
-      `to be deduped (got request_id="${requestId}", event_id="${eventId}")`
+      'ICP_MALFORMED_EVENT: the scored event has no request_id, so every callback ' +
+      'would share one ledger key and all but the first would be dropped'
     );
     error.name = 'IcpMalformedEvent';
     throw error;
   }
-  key = `clay:scored:${requestId}:${eventId}`;
-} else {
-  // Both endpoints are authenticated, so an unrecognised body is not a passing
-  // scanner — it is a real payload we do not understand, and staying quiet
-  // about it means an org silently never gets scored.
-  const error = new Error(
-    'ICP_UNKNOWN_PAYLOAD: body matched neither the Pipedrive v2 envelope ' +
-    '(meta.id) nor the Clay callback (event === "' + cfg.clay_event_name + '")'
-  );
-  error.name = 'IcpUnknownPayload';
-  throw error;
+  const eventId = raw.event_id === undefined || raw.event_id === null ? '' : String(raw.event_id);
+  key = `clay:scored:${requestId}:${eventId === '' ? '-' : eventId}`;
 }
 
 // ---------------------------------------------------------------------------

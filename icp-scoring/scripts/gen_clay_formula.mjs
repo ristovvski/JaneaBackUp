@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// scripts/gen_clay_formula.mjs — write engine/clay_formula.txt from config/rubric_v5.json.
+// scripts/gen_clay_formula.mjs — write engine/clay_formula.txt from config/rubric_v6.json.
 //
 // Clay runs the score in a formula column; n8n and the tests run
 // engine/scoring.mjs. Two implementations of one rubric is a drift machine, so
@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const RUBRIC = JSON.parse(readFileSync(join(ROOT, 'config', 'rubric_v5.json'), 'utf8'));
+const RUBRIC = JSON.parse(readFileSync(join(ROOT, 'config', 'rubric_v6.json'), 'utf8'));
 
 // The markers the parity test slices between. Keep them byte-stable.
 export const BEGIN = '/* ---8<--- BEGIN PORTABLE BODY (parity-tested; do not edit) --- */';
@@ -34,7 +34,7 @@ for (const [name, row] of Object.entries(RUBRIC.industry_verticals)) {
 }
 
 const body = `${BEGIN}
-// Generated from config/rubric_v5.json — model ${RUBRIC.model_version}. Do not hand-edit.
+// Generated from config/rubric_v6.json — model ${RUBRIC.model_version}. Do not hand-edit.
 var RUBRIC = {
   model_version: ${j(RUBRIC.model_version)},
   weights: ${j(RUBRIC.weights)},
@@ -194,7 +194,7 @@ ${END}`;
 const file = `Clay formula column: score_json  (table ICP_Engine, column 8)
 ================================================================
 
-GENERATED from config/rubric_v5.json by scripts/gen_clay_formula.mjs — model ${RUBRIC.model_version}.
+GENERATED from config/rubric_v6.json by scripts/gen_clay_formula.mjs — model ${RUBRIC.model_version}.
 Do not hand-edit. Regenerate with \`npm run gen:formula\`.
 
 tests/contract/clay_parity.test.mjs slices the block between the two 8<
