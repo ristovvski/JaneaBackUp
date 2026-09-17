@@ -774,3 +774,120 @@ auth but a dead endpoint: n8n answers every delivery with 500 *"No
 authentication data defined on node!"* while the subscription upstream still
 looks healthy. Both now say `authentication: 'none'` explicitly and run on the
 unguessable path, and `validate()` rejects either half without the other.
+
+---
+
+## 12. v6: the table replaces the Workflow, 2026-09-17
+
+Nik's Clay **table** takes over from the Clay **Workflow**, and it posts one
+consolidated event instead of seven classifier objects. Four classifiers survive
+under `cls_all`; geography, revenue_range and buying_signal arrive already
+levelled inside `score`.
+
+### The posture change, and why it is not a downgrade
+
+v5 had n8n re-derive the score from the seven components and flag a
+disagreement with Clay's formula column. v6 removes the inputs that made that
+possible — three of the six levels now arrive computed, with no component
+object behind them — so a recompute would have nothing to recompute *from*.
+
+n8n therefore **validates and rejects** instead. `engine/validate_event.mjs`
+checks, in order:
+
+| class | checks |
+|---|---|
+| shape | every required key, every enum, no unknown key anywhere |
+| arithmetic | weights sum to 100; the composite weighs out from the posted levels; the multiplier is the one the rubric gives that activation state; both finals are the composite rounded half-up; the grade is what the thresholds say |
+| coherence | a level in `score` matches the classifier it came from; the industry level matches the vertical's rubric tier; an unknown vertical is levelled 0 **and** flagged; an undated Contracting is downgraded **and** flagged |
+
+Anything that fails throws `IcpMalformedEvent`, which routes to the error branch
+— the org is marked Errored, Slack is alerted, nothing is written. That is
+stricter than v5, not looser: v5 would have written *its own* number over a
+disagreeing one, which is only correct while n8n still has the inputs to be
+right.
+
+Two fields are taken on trust, and the file says so rather than inventing a rule
+the payload cannot support: `confidence_overall` (n8n never receives the
+per-source confidences the table weighed) and `tier2_candidate` (the rule reads
+a revenue **number**; v6 sends a band string).
+
+The validator has no imports, so `scripts/gen_nodes.mjs` splices it into
+ParseScored the way the normalizer is spliced into BuildClayRequest. The rule
+that rejects an event is the source its 36 unit tests exercise, not a copy of
+it — and a test asserts the deployed node still contains it byte for byte.
+
+### rubric_v6.json
+
+Activation multipliers **1.00 / 0.95 / 0.80 / 0.00**. The v5 table gave
+Transitioning the same 1.00 as Accelerating and Stable 0.85; v6 separates all
+four, so a transitioning account is no longer scored as if it were accelerating.
+The unknown-vertical rule (level 0, flag `unknown_vertical`, confidence low) is
+now stated as rubric data rather than left as an implementation detail, and
+ParseScored enforces it at the boundary.
+
+`config/rubric_v5.json` is kept, marked `superseded_by`, with a test that walks
+`engine/`, `scripts/`, `clay/`, `n8n/` and `config/` and fails if any code still
+reads it. One rubric no code reads is history; two rubrics some code reads is a
+second source of truth.
+
+### The audit store
+
+Google Sheets is gone, with its OAuth credential. The audit row goes to an n8n
+**Data Table**, `icp_audit`, addressed by name — no credential, no consent
+screen, no external service between a disputed score and its row.
+
+Creating the table is the one manual step, and not for want of trying. n8n's
+public API has no data-tables endpoint (`GET /api/v1/data-tables` → 404) and the
+internal REST API wants a browser session, so the only component on the instance
+that can reach data tables with an API key is a workflow node. Probed by running
+each operation inside a throwaway webhook workflow:
+
+| probe | result |
+|---|---|
+| `resource=row, operation=get` | `Could not find the data table: 'icp_audit'` |
+| `resource=row, operation=insert` | reached the column mapper |
+| `resource=table, operation=list` | `Could not get parameter` |
+| `resource=table, operation=create` | `Could not get parameter` |
+
+The `row` half — the half Path B uses — works; the `table` resource is not in
+this build of the node. `npm run audit:table` prints the 31 columns and their
+types; `config/icp_audit_table.json` is the spec, and a test asserts it matches
+`BuildAuditRow`'s emitted keys and that every emitted value fits its column's
+declared type. It is also **31 columns, not 32** — my §11 said 32 and was wrong.
+
+### Two things that were quietly broken and are not now
+
+**Dedupe told the paths apart by reading `event === "icp.scored"` out of the
+body.** v6 sends no such key, so every Path B delivery would have been rejected
+as an unknown payload. The path is now whichever webhook node is connected
+upstream — a fact about the graph, not about the payload — and the Path B key is
+`request_id` plus `event_id` when the table sends one. v5 required both halves;
+requiring an `event_id` v6 does not send would have dropped every callback after
+the first.
+
+**A name-only org never got its identifiers back.** Path A resolves a company
+from a bare name, the table finds the domain and the LinkedIn URL, and until now
+that resolution was thrown away — so the next run started from the bare name
+again. `BuildOrgPatch` now fills `website` and `linkedin` from `resolved` when
+the record has neither. Fill, never correct: a value already there was put there
+by someone, and this workflow's job is scoring.
+
+### Live, on the DEV workflow
+
+- Path A → the table's webhook source (`405b603c`), `model_version: v6`,
+  carrying `company_name`, `hq_country` and `hq_state` for `find_by_name` —
+  execution 60398, Clay returned `{"success": true}`.
+- Path B, all 13 spine nodes on a v6 event — execution 60399. Org 2695 reads
+  **ICP A / 93 / v6**, note 9438 carries the new Reference line
+  (`eng roles open 11 · revenue $10M-$25M`), `ICP Final` untouched.
+- The fill-if-empty fired on the live record: org 2695 had no website and no
+  LinkedIn URL, and now has both.
+- `Append audit row` is the only red node, with the message the whole design is
+  for: `Could not find the data table: 'icp_audit'`.
+
+The Clay Workflow's trigger record is deleted, but Clay keeps the webhook source
+`c595e975` routing into the workflow independently of it — a POST there still
+starts a run. It cannot reach Path B: it dies at the first classifier with a 401
+(clay/WORKFLOW.md gap 7), so it can neither score nor call back. Nothing points
+at it any more; if it should be gone rather than merely unreachable, the
+workflow itself has to be deleted, which is a call for its owner.
