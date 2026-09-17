@@ -1028,3 +1028,186 @@ only on Contracting, since a discounted score is illegible without it.
    13–15 as suspect, and prints a table that currently says so rather than
    passing quietly. The three hard assertions do run and pass on synthetic
    facts: Akuvo A (93), Microsoft C (40, tier 2), Merck C (30, tier 2).
+
+---
+
+## 14. The Pipedrive contract, final — 2026-09-17
+
+One field, one activity, nothing else. Everything a run produces goes to
+`icp_audit`.
+
+### §1 — the two organization fields
+
+Read first, as asked. **Neither existed**, so neither had a type to conflict
+with and nothing needed checking back on before changing:
+
+| field | key | type | created |
+|---|---|---|---|
+| Auto-ICP Score | `d11624207b9c7a4a9c56c9bbac7454db300c8b65` | `varchar` (text) | yes |
+| Sales Rep ICP Score | `ce4100722388927674f8b83bad551a2c666aacd4` | `varchar` (text) | yes |
+
+The creation script re-reads before it writes and refuses to act on a name that
+already appears twice, so re-running it cannot add a duplicate — which matters
+given the account's existing duplicate problem on organizations.
+
+Auto-ICP Score holds `"<final> - <grade>"` — `"93 - A"` — or
+`"n/a - insufficient data"`. The insufficient form deliberately keeps the
+separator so a column of these sorts and filters as one thing, and it is words
+rather than `0 - C`, which would be a lie with the same shape as a real answer.
+
+Sales Rep ICP Score is **never written**. `BuildOrgPatch` asserts its absence
+rather than omitting it, and refuses any patch carrying more than one key by
+**counting** — so a field added in future has to be added here deliberately
+rather than slipping in.
+
+### §3 — what was removed
+
+| removed | what it did |
+|---|---|
+| `ICP Calculated` write | enum, `ICP A/B/C` / `Insufficient data` / `Error` |
+| `ICP Score` write | the number |
+| `ICP Scored At` write | the date the 180-day gate read |
+| `ICP Model Version` write | the rubric version |
+| website / linkedin fill-if-empty | wrote two standard org fields |
+| `BuildNote` + `POST note` | a Pipedrive **note** per run |
+| `BuildErrorPatch` + `IF error patch non-empty?` + `PATCH organization error` + `Skip error patch` | marked the org `Error` on failure |
+
+**Custom fields this repo created and no longer writes** — Nik decides whether
+to delete them. They still exist on the account:
+
+```
+ICP Calculated      05a05bfc00c020018c76735b3970fbfa27378af4   enum
+ICP Score           89a19a01cc27ae0fde9183852dc133abf52f18d5   double
+ICP Scored At       80c7b7ee45cc4df1a73bbcb80ac54cc8769cd77d   date
+ICP Model Version   d120f20ad024b2f5b9e9f6dd2302094097707045   varchar
+ICP Final           95449f59b1dbc8d126dfd16bd321dd6eda102eb8   enum   (never written, any version)
+```
+
+The error path now writes **nothing** to the organization. A field that says
+`Error` is a field a rep learns to ignore, and it reads identically to a
+judgement about the company. A failed run leaves the same footprint a
+successful one does: one activity, saying the run failed and that the audit row
+has the detail.
+
+### A consequence that had to be handled, not discovered later
+
+`IdempotencyGate` read three of the four removed fields. Its freshness test was
+*real grade + current model + younger than 180 days*, and two of those three
+inputs no longer exist on the record.
+
+It now **skips when Auto-ICP Score holds a real grade**, matched on shape
+(`/^\d{1,3} - [ABC]$/`), so `n/a - insufficient data` is retried rather than
+freezing an account out. What that costs is written at the top of the node:
+the 180-day window and the model-bump re-score are gone. Both are recoverable
+from `icp_audit`, which holds `ts`, `requested_at` and `model_version` per run —
+that is a Path A lookup against a table that does not exist yet, so it is named
+rather than guessed at. A test asserts the note stays in the file.
+
+### §2 — the activity
+
+`task`, subject `ICP scored`, `done: true`. Pipedrive has **no "note" activity
+type**; `task` is the generic one this account actually uses (the live types by
+volume are meeting 445, email 28, qualify 11, renewal 9, task 7).
+
+"No raw field names" is the rule that shaped the node. The evidence the table
+sends is full of them, so `BuildActivity` does **not** pass evidence through and
+clean it — it writes from the structured facts in its own words and touches
+evidence in exactly one place, the discarded-input sentences, where the value is
+the point and the label is stripped. What it cannot say in plain words it does
+not say. Budget enforced by dropping whole sentences in a fixed order, so the
+headline, the activation block and the CHECK line always survive.
+
+### The fired test
+
+Org 2695 reset first, with a human value seeded in Sales Rep ICP Score to prove
+it survives. Execution 60495.
+
+**Request** — `POST /webhook/<path-b>`, the `icp_scored_A` fixture retargeted at
+org 2695, `request_id: req-live-1789647562183`. **Response**: `HTTP 200 ok`.
+
+**The one field write**, raw from the run:
+
+```json
+{ "custom_fields": { "d11624207b9c7a4a9c56c9bbac7454db300c8b65": "93 - A" } }
+```
+
+**The one activity** — id 46828, `type: task`, `done: true`, `org_id: 2695`,
+565 chars:
+
+```
+ICP A — 93 out of 100.
+
+FinTech, anchor for us. Software-native. US-based. Revenue around $10M–$25M,
+inferred from headcount rather than read from a filing. Series B–D growth,
+limited internal capacity, active investment + roadmap commitments. 3
+engineering roles open, 2 of them for more than two months, an engineering lead
+in post (Head of Engineering).
+
+We set aside Apollo revenue $1.1M — $12k/employee.
+
+Activation: accelerating, so the score stands in full.
+
+CHECK: the revenue band is an estimate from headcount, not a filing — confirm
+before sizing a deal.
+```
+
+**The record afterwards**:
+
+```
+Auto-ICP Score       "93 - A"                    <- the one write
+Sales Rep ICP Score  "80 - A (Toby, by hand)"    <- untouched
+ICP Calculated       null    ICP Score         null
+ICP Scored At        null    ICP Model Version null    ICP Final null
+website / linkedin   unchanged
+activities on org 2695 with subject "ICP scored": 1
+```
+
+`Append audit row` is the only red node, still: `Could not find the data table:
+'icp_audit'`.
+
+### The v6 Test Accounts sheet
+
+Loaded: 21 accounts, 16 graded, rows 13–15 (Lumo Technologies, Morgan Stanley
+@Work, Johnson & Johnson) flagged suspect and excluded from the rate. The
+exporter needed real hardening — a title block before the header, newlines
+inside header cells, a mojibake em dash in "SaaS — Other", and a "How to use
+this sheet" block that parses as six accounts called "1." through "6.".
+
+Per-component agreement, on the three accounts that have captured facts:
+
+| component | agreed | rate | disagreements |
+|---|---|---|---|
+| vertical | 3/3 | 100% | |
+| type | 3/3 | 100% | |
+| stage | 1/3 | 33% | Microsoft (human 7, engine 0); Merck (human 7, engine 0) |
+| geo | 3/3 | 100% | |
+| revenue | 3/3 | 100% | |
+| activation | 2/3 | 67% | Microsoft (human Contracting, engine Stable) |
+
+Hard assertions pass: Akuvo A (93), Microsoft C (40), Merck C (30).
+
+Three things worth reading in that table rather than past:
+
+1. **Stage disagrees on both enterprises.** The humans put Microsoft and Merck
+   at 7; the engine says 0 from synthetic facts. One of the two is wrong about
+   what "stage maturity" means for a 70 000-person company, and it is worth
+   settling before the remaining 18 accounts are scored against it.
+2. **Microsoft's activation.** The sheet says Contracting; the guard downgrades
+   it to Stable because the synthetic facts carry no headcount fall. That is the
+   guard working, and it is also the sheet asserting something the enrichment
+   has not evidenced.
+3. **The sheet does not round.** It carries Merck at 44.4 and Morgan Stanley at
+   95.0; the engine rounds half-up to integers. Grades are unaffected at every
+   row, so this is a display difference, not a disagreement — but a
+   final-score-to-final-score comparison will show 21 mismatches and mean
+   nothing.
+
+### Flagged, not adapted
+
+**Workato is "Horizontal B2B Software", scored 10 in the sheet.** That vertical
+is not one of the 17 in `rubric_v6.json`, and the previous instruction was
+explicit that it is NOT in the v6 sub-rubric and must read as unknown. The
+engine therefore scores it 0 and flags `unknown_vertical`, where the sheet gives
+it 10 and a composite of 100. The exporter reports the discrepancy on every run
+rather than coercing it. Either the vertical joins the rubric or the sheet row
+is wrong; I have not chosen.

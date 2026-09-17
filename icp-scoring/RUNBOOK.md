@@ -86,7 +86,7 @@ Two, by name. Values are never in this repo.
 
 | Credential | Type | Holds |
 |---|---|---|
-| `pipedrive_main` | Pipedrive API | the API token for org GET/PATCH and note POST |
+| `pipedrive_main` | Pipedrive API | the API token for the org GET/PATCH and the activity POST |
 | `slack_ops` | Slack API | posting to the ops channel |
 
 Three credentials that earlier versions needed are gone, and none of them was
@@ -191,7 +191,7 @@ Then, in the n8n UI:
 Confirm on import:
 
 - [ ] the Data Table node's column mapping is `autoMapInputData` and the
-      `icp_audit` table's columns match `BuildAuditRow`'s 36, by name
+      `icp_audit` table's columns match `BuildAuditRow`'s 37, by name
 - [ ] every node shows a green credential, none shows "credential not found"
 - [ ] both webhook nodes show their authentication set
 - [ ] `settings.errorWorkflow` resolves to the real WF-ERR (the export carries
@@ -217,7 +217,7 @@ touches this subtree — it is the authority, because it needs no guessing.
 ### 6. Create the `icp_audit` Data Table
 
 ```bash
-npm run audit:table      # prints the 36 columns and their types, ready to type in
+npm run audit:table      # prints the 37 columns and their types, ready to type in
 ```
 
 n8n → **Data tables** → **Create data table**, named exactly `icp_audit`, then
