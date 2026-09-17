@@ -891,3 +891,140 @@ starts a run. It cannot reach Path B: it dies at the first classifier with a 401
 (clay/WORKFLOW.md gap 7), so it can neither score nor call back. Nothing points
 at it any more; if it should be gone rather than merely unreachable, the
 workflow itself has to be deleted, which is a call for its owner.
+
+---
+
+## 13. Scoring moves into n8n, 2026-09-17
+
+The v6 split finished: the Clay table classifies and enriches, n8n scores. The
+event carries **no score at all**, so there is exactly one implementation of the
+rubric in the delivery path and nothing left to police. §12's validator, which
+checked the table's arithmetic, is replaced by one that checks only that the
+payload is something the scorer can work from.
+
+### The Score node
+
+`n8n/nodes/Score.js` is generated, not written. Its arithmetic is spliced from
+`engine/clay_formula.txt`, whose body `clay_parity.test.mjs` already asserts is
+deep-equal to `engine/scoring.mjs` over 500 generated inputs, so this is the
+tested implementation with the module wrapper removed rather than a third copy
+of the rubric. `nodes_execute.test.mjs` then runs the node and the module side
+by side on every fixture and compares composite, both finals, grade, status,
+multiplier, tier-2 and the whole levels map.
+
+It sits between `ParseScored` and the write gate as its own node on purpose: a
+run trace that shows the two separately is how you tell *the table sent
+nonsense* from *the rubric graded it low*.
+
+### The Contracting guard, and why it is not the v5 rule
+
+v5 asked whether the Contracting evidence was dated. That turned out to be the
+wrong question — **a well-dated funding round is not evidence of contraction**,
+and the task's own `contracting_unbacked` case is exactly that: the classifier
+says Contracting and offers `apollo.funding_events[0].date: 2025-09-01` as its
+citation while Apollo reports headcount up 5%.
+
+Contracting is a multiplier of **zero**. It takes an account off the board, so
+the bar is higher than for any other state. It now stands only if either:
+
+1. `apollo_summary.headcount_6mo_growth <= -0.15` — a measured contraction; or
+2. the citation **names a layoff or hiring freeze** *and* carries a date within
+   twelve months of `requested_at`.
+
+Otherwise the state is downgraded to the rubric default and flagged, with the
+reason carried into the note. Test 2 is a keyword match, and it is written as
+one: the word list is explicit and narrow, and a miss costs a downgrade — the
+safe direction. Live, on the deployed workflow:
+
+```
+claimed  Contracting          used    Stable        guard  true
+reason   headcount_6mo_growth 0.05 > -0.15; cited evidence names no layoff or hiring freeze
+mult     0.80   final 64   without activation 81   grade B
+```
+
+That account would have scored 0 under the v5 rule.
+
+### The fixtures are inputs now
+
+Eight, one per case the task names. A v6 fixture cannot assert a grade the
+engine does not produce, because it carries no grade — `npm run gen:fixtures`
+computes and prints what each one scores, so the file list doubles as a
+statement of what the set is for:
+
+| fixture | composite | × | final | grade | note |
+|---|---|---|---|---|---|
+| `A` | 92.5 | 1.00 | 93 | A | the hard assertion |
+| `B_stable` | 92.5 | 0.80 | 74 | B | composite clears 75, activation drags it under |
+| `contracting_valid` | 92.5 | 0.00 | 0 | C | headcount down 18%, so the zero stands |
+| `contracting_unbacked` | 80.5 | 0.80 | 64 | B | guard fired |
+| `insufficient` | 22 | 0.80 | 18 | — | insufficient_data, no grade |
+| `tier2` | 38 | 0.80 | 30 | C | revenue level 0, 71 000 employees |
+| `unknown_vertical` | 85 | 1.00 | 85 | A | "Horizontal B2B Software" → level 0 + flag |
+| `malformed` | — | — | — | — | six violations, one per check class |
+
+`unknown_vertical` still grades A, and that is correct: industry carries 15 of
+100, so a strong account survives an unknown vertical. **The flag is the signal,
+not the grade** — which is worth knowing before someone reads the grade as
+endorsement of the vertical.
+
+### The note
+
+Two new lines and one rule change:
+
+```
+Revenue 7 $10M–$25M via headcount_band (apollo revenue $1.1M discarded: $12k/employee)
+Hiring 3 eng open, 2 ≥60d, leader: Head of Engineering, ratio 0.17
+```
+
+The hiring line has three distinct forms — postings found, `no postings found`,
+and `dates unavailable` — because collapsing any two is a lie a rep acts on. A
+zero and an unknown are opposite facts; that distinction is the whole reason
+stage_maturity was wrong on Akuvo in §11. The counterfactual (`without
+activation: X → grade`) now appears whenever the multiplier is not 1.00, not
+only on Contracting, since a discounted score is illegible without it.
+
+### Live, on DEV
+
+- **Path A** (execution 60418): `requested_at: "2026-09-17T10:35:24.211+00:00"`,
+  `org_id: 2695` and `deal_id: 999001` as **numbers**, every null sent as null,
+  `company_name`/`hq_country`/`hq_state` present. It went out as a **domain**
+  lookup rather than a name one — because §12's fill-if-empty gave org 2695 its
+  website and LinkedIn URL, which is that loop closing in production.
+- **Path B** (execution 60420): all 14 spine nodes green, `Score` among them.
+  Org 2695 reads ICP A / 93 / v6, note 9439 carries the new Revenue and Hiring
+  lines, `ICP Final` untouched.
+- `Append audit row` is the only red node: `Could not find the data table:
+  'icp_audit'` — still the one manual step, now **36 columns** (31 + the five
+  §8 adds). An absent hiring count writes `-1`, because a number column cannot
+  hold "unknown" and `0` would be the wrong answer.
+
+### What differs from the task, flagged rather than adapted
+
+1. **The audit table is 36 columns, not 37.** §8 says "32 columns as before +
+   five". The set before was **31** — §11 said 32 and was wrong, corrected in
+   §12. 31 + 5 = 36.
+2. **`callback_url` stays in the Path A body.** §2's field list omits it, but
+   the table has to know where to post back, and it was in the v5 contract.
+3. **`geography` and `buying_signal` are accepted with or without `confidence`
+   and `missing_inputs`.** §3 shows geography with `confidence` but no
+   `missing_inputs`, and buying_signal with neither. Both are accepted either
+   way: rejecting a run because a sibling key travelled would cost a score, and
+   the extra key changes nothing downstream.
+4. **`requested_at` comes from CONFIG, not from `$now` in the node.** §2 says
+   `$now.toISO()`; CONFIG mints exactly that, once per execution, so every node
+   agrees on one instant. A run straddling midnight must not tell the table one
+   date and the audit row another.
+5. **The Clay Workflow trigger could not be unpublished.** The trigger record is
+   deleted and the workflow is renamed `[RETIRED …]`, but Clay keeps the webhook
+   source `c595e975` routing into it independently of the trigger, and the CLI
+   has `publish` with no inverse. A POST there still starts a run. It cannot
+   reach Path B — it dies at the first classifier with a 401, and could only
+   call back to a `callback_url` the caller itself supplied — and nothing in
+   this stack points at it. Deleting the workflow would settle it, and the task
+   says not to.
+6. **The per-component agreement table is empty.** The v6 Test Accounts CSV is
+   still not in the repo. The harness reads Vertical / Type / Stage / Geo /
+   Revenue / Activation columns when the sheet supplies them, excludes rows
+   13–15 as suspect, and prints a table that currently says so rather than
+   passing quietly. The three hard assertions do run and pass on synthetic
+   facts: Akuvo A (93), Microsoft C (40, tier 2), Merck C (30, tier 2).
