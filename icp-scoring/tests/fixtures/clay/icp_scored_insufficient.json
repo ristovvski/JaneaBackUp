@@ -1,99 +1,24 @@
 {
-  "request_id": "req-icp-0005",
-  "org_id": 10005,
+  "request_id": "req-icp-0004",
+  "org_id": 10004,
   "deal_id": null,
   "requested_at": "2026-09-18T10:42:00Z",
-  "domain": "stealthrobotics.io",
-  "resolved": {
-    "domain": null,
-    "linkedin_url": null,
-    "website": null
-  },
-  "cls_all": {
-    "engineering_hiring": {
-      "total_open": null,
-      "eng_open": null,
-      "eng_open_60d_plus": null,
-      "dates_available": null,
-      "leader_titles": [],
-      "eng_titles_with_days": [],
-      "eng_open_ratio": null,
-      "eng_headcount": null
-    },
-    "industry_vertical": {
-      "value": "Manufacturing tech / Industrial IoT",
-      "evidence": [
-        "company_name: Stealth Robotics"
-      ],
-      "confidence": "low",
-      "missing_inputs": [
-        "website",
-        "li_description"
-      ]
-    },
-    "company_type": {
-      "level": 3,
-      "evidence": [
-        "company_name only"
-      ],
-      "confidence": "low",
-      "missing_inputs": [
-        "li_description"
-      ]
-    },
-    "stage_maturity": {
-      "level": null,
-      "evidence": [],
-      "confidence": "low",
-      "missing_inputs": [
-        "funding_stage",
-        "eng_open"
-      ]
-    },
-    "activation_state": {
-      "value": null,
-      "evidence": [],
-      "activation_evidence_dated": null,
-      "confidence": "low",
-      "missing_inputs": [
-        "news"
-      ]
-    },
-    "geography": {
-      "level": 10,
-      "evidence": [
-        "apollo.country: United States"
-      ],
-      "confidence": "medium"
-    },
-    "revenue_range": {
-      "level": null,
-      "revenue_band_used": null,
-      "revenue_source": null,
-      "evidence": [],
-      "confidence": "low",
-      "missing_inputs": [
-        "apollo.annual_revenue",
-        "apollo.employees"
-      ]
-    },
-    "buying_signal": {
-      "level": 0,
-      "evidence": []
-    },
-    "conflict_note": null
-  },
-  "apollo_summary": {
-    "employees": null,
-    "eng_headcount": null,
-    "country": "United States",
-    "state": null,
-    "founded_year": null,
-    "last_round_date": null,
-    "headcount_6mo_growth": null,
-    "headcount_12mo_growth": null,
-    "publicly_traded_symbol": null,
-    "owned_by_organization_id": null
-  },
-  "model_version": "v6"
+  "final": null,
+  "grade": null,
+  "status": "insufficient_data",
+  "note": "ICP v6 — Not calculated: insufficient data\nStage, revenue and company type could not be established from the available enrichment, so no grade was produced.",
+  "composite": null,
+  "multiplier": null,
+  "final_without_activation": null,
+  "industry_level": null,
+  "stage_level": null,
+  "type_level": null,
+  "geo_level": 10,
+  "revenue_level": null,
+  "activation_used": null,
+  "confidence_overall": "low",
+  "tier2_candidate": false,
+  "flags": [
+    "insufficient_data"
+  ]
 }

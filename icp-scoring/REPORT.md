@@ -1681,3 +1681,153 @@ not because the trigger missed it, but because there is no company on it. That
 is a Pipedrive data question, the same shape as the Website URL one: a lead
 needs an organization before conversion, or the conversion step has to create
 one. Worth raising with Nik alongside the website requirement.
+
+---
+
+## 18. The table scores, n8n writes — 2026-09-17
+
+Path B answered Clay `200`, wrote nothing to org 22586, and told nobody.
+Request `req-7be8d908-…`, execution **60629**. This section is what was wrong,
+what changed, and the replay of that exact body against the new Path B.
+
+### 1. The execution, and the three separate faults in it
+
+`ParseScored` produced **0 items on output 0 and 1 on output 1** — its error
+branch. The event was a v6.0 classifier payload and Path B was validating the
+v6.0 contract's successor; `cls_all`, `apollo_summary` and friends against
+`final`, `grade`, `note`. That is the mismatch, and it is the easy part.
+
+Three things made it *silent*, and each was its own bug:
+
+**The execution ended `success`.** `ParseScored` carries
+`onError: continueErrorOutput`, so a rejected event flows down the error branch
+and the branch completes. n8n only runs `settings.errorWorkflow` when an
+execution ends in **error**, so `WF-ERR` — which has been posting ICP failures
+to Slack all day — never fired. A 200 ack followed by a silent validation
+failure is invisible to Clay too: the table has no idea the row was rejected
+and will not resend.
+
+**The Slack alert was never wired.** `Slack alert error` returned
+`{"error":"Node does not have any credentials set"}` into a `continueOnFail`
+that swallowed it. A working Slack credential was sitting on `WF-ERR` the whole
+time.
+
+**The failure activity landed on nothing.** n8n's task runner does not carry a
+thrown error's own properties across an error output: `ParseScored` threw an
+`IcpMalformedEvent` with `.problems` and `.org_id` set, and `BuildErrorContext`
+received `IcpUnknownError`, `problem_count: 0`, `org_id: null`. So activity
+**46842** was posted with `org_id: null` — an orphan, invisible on org 22586,
+reading `Reason: undefined`. The user's "no activity" was right in every way
+that matters.
+
+### 2. Path B now validates the scored contract
+
+Eight required keys — `request_id`, `org_id`, `deal_id`, `requested_at`,
+`final`, `grade`, `status`, `note` — and twelve optional ones carrying the
+working: `composite`, `multiplier`, `final_without_activation`, the five
+`*_level`, `activation_used`, `confidence_overall`, `tier2_candidate`, `flags`.
+`additionalProperties: false` over exactly those twenty.
+
+One cross-field rule survives, and it is the one worth having: **`status:
+"scored"` with a null `final` or `grade` is refused.** A grade-shaped blank on
+a rep's record is the single worst thing this workflow could write.
+
+`deal_id` is required to be *present* but may be `null` — a re-score can happen
+outside a deal, and rejecting that would be rejecting a correct run. That is
+the one place this deviates from the instruction as literally written.
+
+### 3. The rubric and the note renderer are gone from n8n
+
+- `n8n/nodes/Score.js` — **deleted**. There is no rubric in the delivery path.
+- `BuildActivity` no longer composes anything. It writes `note` **verbatim**,
+  and the test asserts byte equality against the event rather than a
+  resemblance to it. No 900-character budget, no sentence-dropping, no reflow.
+- `BuildOrgPatch` reads `ParseScored` and writes `"<final> - <grade>"` from the
+  table's own numbers. A test pins this by sending a grade the rubric would
+  never produce from those levels and asserting it is written anyway.
+- `BuildRunSummary` records the working and the note's **length**, never its
+  text.
+
+**What that costs, on the record.** Nothing in n8n checks the arithmetic any
+more, and nothing catches a vertical the table spells differently from the
+rubric. `SaaS - Other` with a hyphen scored 7 in Clay and would have scored 0
+here — the note from the live run still reads `Industry 7/10 · SaaS — Other`,
+so the em dash is right today, but only Clay's map decides now.
+`engine/clay_score.py` is no longer one of two implementations in the delivery
+path; it is the only one, and the 500 generated parity cases matter more than
+they did, not less.
+
+### 4. It cannot die quietly again — four changes
+
+| change | what it buys |
+|---|---|
+| **`FailLoudly`**, wired last on the error branch, throws | the execution ends **red**, so `WF-ERR` fires and the failure reaches Slack through the alerting the rest of the stack already uses |
+| the deploy script **borrows a credential by type** from the instance, asking the error workflow first | `Slack alert error` is now wired to the same credential and channel `WF-ERR` posts to — no instance-specific id in a tracked file |
+| `BuildErrorContext` reads the ids off the **webhook item** and re-derives the problem list by **re-validating** the received body | the alert and the activity carry the org, the request and every violation by name, instead of `org_id: null` and `Reason: undefined` |
+| `POST activity error` and `FailLoudly` read `BuildErrorContext` **by name** | their `$json` was the previous node's HTTP response; that is how `Number(undefined)` became an activity on no organization |
+
+`BuildErrorContext` is generated now, for one reason: so
+`engine/validate_event.mjs` can be spliced into it and the reason given in
+Slack is the reason the event was actually refused, not a second opinion. The
+skeleton is `n8n/nodes/src/BuildErrorContext.src.js` with a `@@VALIDATOR@@`
+marker.
+
+**And a fifth, found while proving the fourth.** The first replay of the exact
+body came back `_duplicate: true` and skipped the write. `Dedupe` writes the
+key to the ledger on **receipt**, before anything has judged the payload — so
+execution 60629 had claimed `req-7be8d908-…` for 48 hours, and Clay's corrected
+redelivery of that row would have been dropped as a duplicate. Silently. A run
+that failed did not happen: `BuildErrorContext` now **releases** the key, and
+reports which one in `dedupe_key_released`.
+
+### 5. The replay
+
+Execution **60648** — a malformed event on the same `request_id`, to prove the
+failure path and release the ledger key:
+
+```
+execution 60648 -> ERROR                    (not a silent success any more)
+BuildErrorContext  org_id 22586 · request_id req-7be8d908-… · released the key
+Slack alert error  {"ok": true, "channel": "C0B8GCVNR5W"}
+```
+
+Execution **60651** — the body from 60629, byte for byte, replayed:
+
+```
+Webhook Clay -> ParseScored -> IF write allowed? -> GET organization B ->
+BuildOrgPatch -> IF patch non-empty? -> PATCH organization ->
+BuildActivity -> POST activity -> BuildRunSummary
+```
+
+**Organization 22586 now reads:**
+
+| field | value |
+|---|---|
+| Auto-ICP Score | **`62 - B`** |
+| Auto-ICP Scored At | **`2026-09-17`** |
+| Sales Rep ICP Score | **`null`** — untouched |
+| every other custom field | `null` — untouched |
+| `website`, `linkedin`, labels, owner | untouched |
+
+**Activity `46845`** — `org_id: 22586`, `type: task`, `done: true`, subject
+`ICP scored`, note **1,225 characters**, which is exactly the length of `note`
+in the event. It opens:
+
+```
+ICP v6 — Calculated: ICP B (62/100) · Confidence: medium
+Industry 7/10 · SaaS — Other — Sells horizontal no-code workflow, forms,
+eSignature, and contract software across many industries — a general SaaS vendor.
+…
+Composite 78.0 × 0.80 = 62 → ICP B
+```
+
+One PATCH, two fields, one activity, nothing else. 635 tests green.
+
+### Alerts go to `#niks-channel`
+
+There is no `#alerts` channel in the workspace. `WF-ERR` has been posting this
+workflow's failures to **`#niks-channel` (`C0B8GCVNR5W`)** all day — including
+the `Dedupe B` and `Append audit row` failures from earlier — so the ICP alert
+was pointed at the same place rather than at a new channel nobody is watching.
+Say the word and it moves; it is one environment variable
+(`ICP_SLACK_CHANNEL`) at deploy time.

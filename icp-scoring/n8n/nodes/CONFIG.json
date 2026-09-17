@@ -143,6 +143,7 @@
   "activity_subject": "ICP scored",
   "activity_max_chars": 900,
   "activity_subject_skipped": "ICP not scored",
+  "activity_subject_failed": "ICP scoring failed",
   "activity_no_website": "Skipped: organization has no Website URL — fill it and re-create the deal or re-run",
   "rescore_after_days": 180,
   "model_effective_date": "2026-09-17",

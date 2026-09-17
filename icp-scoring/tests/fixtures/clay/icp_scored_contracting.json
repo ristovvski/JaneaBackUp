@@ -1,0 +1,22 @@
+{
+  "request_id": "req-icp-0003",
+  "org_id": 10003,
+  "deal_id": null,
+  "requested_at": "2026-09-18T10:42:00Z",
+  "final": 0,
+  "grade": "C",
+  "status": "scored",
+  "note": "ICP v6 — Calculated: ICP C (0/100) · Confidence: medium\nActivation Contracting ×0.00 — Layoffs reported 2026-03-14.\nComposite 92.5 × 0.00 = 0 → ICP C",
+  "composite": 92.5,
+  "multiplier": 0,
+  "final_without_activation": 92.5,
+  "industry_level": 10,
+  "stage_level": 7,
+  "type_level": 10,
+  "geo_level": 10,
+  "revenue_level": 7,
+  "activation_used": "Contracting",
+  "confidence_overall": "medium",
+  "tier2_candidate": false,
+  "flags": []
+}

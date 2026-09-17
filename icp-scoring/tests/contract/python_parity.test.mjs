@@ -183,51 +183,22 @@ describe('Python / JavaScript parity', () => {
     });
   });
 
-  test('every clay fixture agrees', (t) => {
-    if (!pythonAvailable) return t.skip('python3 unavailable');
-    const names = [
-      'icp_scored_A', 'icp_scored_B_stable', 'icp_scored_contracting_valid',
-      'icp_scored_contracting_unbacked', 'icp_scored_insufficient',
-      'icp_scored_tier2', 'icp_scored_unknown_vertical',
-    ];
-    // v6 events carry no score, so the scoring input is rebuilt from cls_all
-    // exactly as the Score node builds it — including the activation guard,
-    // which decides the state before either implementation sees it.
-    const inputs = names.map((name) => {
-      const event = JSON.parse(readFileSync(join(ROOT, 'tests', 'fixtures', 'clay', `${name}.json`), 'utf8'));
-      const c = event.cls_all;
-      const guard = activationStateFor(c.activation_state, event.apollo_summary, event.requested_at, 'Stable');
-      const conf = (x) => (x.confidence === undefined ? null : x.confidence);
-      const miss = (x) => x.missing_inputs || [];
-      return {
-        industry_vertical: c.industry_vertical.value,
-        levels: {
-          stage_maturity: c.stage_maturity.level, company_type: c.company_type.level,
-          geography: c.geography.level, revenue_range: c.revenue_range.level,
-          buying_signal: c.buying_signal.level,
-        },
-        activation_state: guard.state,
-        activation_evidence_dated_within_months: 0,
-        confidence: {
-          industry_vertical: conf(c.industry_vertical), stage_maturity: conf(c.stage_maturity),
-          company_type: conf(c.company_type), geography: conf(c.geography),
-          revenue_range: conf(c.revenue_range), buying_signal: conf(c.buying_signal),
-        },
-        missing_inputs: {
-          industry_vertical: miss(c.industry_vertical), stage_maturity: miss(c.stage_maturity),
-          company_type: miss(c.company_type), geography: miss(c.geography),
-          revenue_range: miss(c.revenue_range), buying_signal: miss(c.buying_signal),
-        },
-        facts_summary: {
-          revenue_usd: null,
-          headcount_total: event.apollo_summary.employees,
-          headcount_eng: event.apollo_summary.eng_headcount,
-        },
-      };
-    });
-    const pythonResults = pythonScore(inputs);
-    names.forEach((name, i) => {
-      assert.deepEqual(pythonResults[i].value, score(structuredClone(inputs[i])), name);
-    });
+  test('the event fixtures no longer drive this — and that raises the stakes', () => {
+    // This used to rebuild a scoring input out of each event's cls_all and
+    // check the two implementations against it. The event carries no
+    // classifier output any more: the Clay table scores, and what crosses the
+    // wire is a grade, a status and a note.
+    //
+    // Which means engine/clay_score.py is no longer ONE of two implementations
+    // in the delivery path — it is the ONLY one. n8n does not recompute, so
+    // nothing downstream will ever disagree with it and raise a flag. The 500
+    // generated cases above are what stands between a rubric edit and a wrong
+    // grade in someone's CRM, so they matter more now, not less.
+    const event = JSON.parse(readFileSync(
+      join(ROOT, 'tests', 'fixtures', 'clay', 'icp_scored_A.json'), 'utf8'
+    ));
+    assert.equal(event.cls_all, undefined, 'no classifier output to rebuild from');
+    assert.equal(typeof event.grade, 'string', 'the grade arrives already made');
+    assert.equal(typeof event.note, 'string', 'and so does the note');
   });
 });

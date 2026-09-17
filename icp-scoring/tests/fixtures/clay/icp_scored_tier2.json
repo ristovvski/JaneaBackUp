@@ -3,97 +3,22 @@
   "org_id": 10006,
   "deal_id": 55006,
   "requested_at": "2026-09-18T10:42:00Z",
-  "domain": "merck.com",
-  "resolved": {
-    "domain": "merck.com",
-    "linkedin_url": "https://www.linkedin.com/company/merck",
-    "website": "https://www.merck.com"
-  },
-  "cls_all": {
-    "engineering_hiring": {
-      "total_open": 400,
-      "eng_open": 40,
-      "eng_open_60d_plus": 12,
-      "dates_available": true,
-      "leader_titles": [
-        "SVP Technology"
-      ],
-      "eng_titles_with_days": [
-        "Data Engineer (30d)"
-      ],
-      "eng_open_ratio": 0.01,
-      "eng_headcount": 4000
-    },
-    "industry_vertical": {
-      "value": "Pharma / Life Sciences",
-      "evidence": [
-        "li_industry: Pharmaceuticals"
-      ],
-      "confidence": "high",
-      "missing_inputs": []
-    },
-    "company_type": {
-      "level": 7,
-      "evidence": [
-        "mission-critical regulated custom software"
-      ],
-      "confidence": "high",
-      "missing_inputs": []
-    },
-    "stage_maturity": {
-      "level": 0,
-      "evidence": [
-        "apollo.employees: 71000"
-      ],
-      "confidence": "high",
-      "missing_inputs": []
-    },
-    "activation_state": {
-      "value": "Stable",
-      "evidence": [
-        "no material news"
-      ],
-      "activation_evidence_dated": null,
-      "confidence": "high",
-      "missing_inputs": []
-    },
-    "geography": {
-      "level": 10,
-      "evidence": [
-        "apollo.country: United States",
-        "apollo.state: New Jersey"
-      ],
-      "confidence": "high"
-    },
-    "revenue_range": {
-      "level": 0,
-      "revenue_band_used": "$10B–$100B",
-      "revenue_source": "apollo_revenue",
-      "evidence": [
-        "apollo.annual_revenue: 64000000000"
-      ],
-      "confidence": "high",
-      "missing_inputs": []
-    },
-    "buying_signal": {
-      "level": 3,
-      "evidence": [
-        "eng_open: 40"
-      ]
-    },
-    "conflict_note": null
-  },
-  "apollo_summary": {
-    "employees": 71000,
-    "eng_headcount": 4000,
-    "country": "United States",
-    "state": "New Jersey",
-    "founded_year": 1891,
-    "last_round_date": null,
-    "headcount_6mo_growth": 0.01,
-    "headcount_12mo_growth": 0.02,
-    "publicly_traded_symbol": "MRK",
-    "owned_by_organization_id": null
-  },
-  "model_version": "v6"
+  "final": 30,
+  "grade": "C",
+  "status": "scored",
+  "note": "ICP v6 — Calculated: ICP C (30/100) · Confidence: low\nFlagged as a Tier 2 candidate: enterprise scale, different motion.",
+  "composite": 38,
+  "multiplier": 0.8,
+  "final_without_activation": 38,
+  "industry_level": 3,
+  "stage_level": 0,
+  "type_level": 3,
+  "geo_level": 10,
+  "revenue_level": 0,
+  "activation_used": "Stable",
+  "confidence_overall": "low",
+  "tier2_candidate": true,
+  "flags": [
+    "tier2_candidate"
+  ]
 }

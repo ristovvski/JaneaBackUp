@@ -19,11 +19,11 @@ import { score } from '../../engine/scoring.mjs';
 import { normalizeDomain } from '../../engine/normalize.mjs';
 import { activationStateFor } from '../../engine/activation_guard.mjs';
 
-/** Every fixture that is supposed to validate. The malformed one is not here. */
+/** Every fixture that is supposed to validate. The bad ones are not here. */
 const VALID_FIXTURES = [
-  'icp_scored_A.json', 'icp_scored_B_stable.json', 'icp_scored_contracting_valid.json',
-  'icp_scored_contracting_unbacked.json', 'icp_scored_insufficient.json',
-  'icp_scored_tier2.json', 'icp_scored_unknown_vertical.json',
+  'icp_scored_A.json', 'icp_scored_B_stable.json', 'icp_scored_bare.json',
+  'icp_scored_contracting.json', 'icp_scored_insufficient.json',
+  'icp_scored_live_intellistack.json', 'icp_scored_tier2.json',
 ];
 
 const SRC = {
@@ -33,7 +33,7 @@ const SRC = {
   BuildClayRequest: readNode('BuildClayRequest'),
   BuildNoWebsiteWrite: readNode('BuildNoWebsiteWrite'),
   ParseScored: readNode('ParseScored'),
-  Score: readNode('Score'),
+  FailLoudly: readNode('FailLoudly'),
   BuildOrgPatch: readNode('BuildOrgPatch'),
   BuildActivity: readNode('BuildActivity'),
   BuildRunSummary: readNode('BuildRunSummary'),
@@ -76,31 +76,27 @@ const parseScored = (event, staticData) => {
   return runCodeNode(SRC.ParseScored, { input: [deduped.json], nodes: { CONFIG: cfg } });
 };
 
-// Score runs on ParseScored's output and hands the same object on with a
-// `score` added, so everything downstream reads one node.
-const scoreNode = (parsed) => runCodeNode(SRC.Score, {
-  input: [parsed],
-  nodes: { CONFIG: cfg },
-});
-
-/** The whole Path B head: dedupe -> parse -> score. */
+/**
+ * The whole Path B head: dedupe -> parse. There is no third step. The table
+ * scores; ParseScored checks that what arrived can be written.
+ */
 const scored = (eventName, staticData) => {
   const event = typeof eventName === 'string' ? clayFixture(eventName) : eventName;
   const [parsed] = parseScored(event, staticData);
-  return scoreNode(parsed.json)[0].json;
+  return parsed.json;
 };
 
 const orgPatch = (out, org) => runCodeNode(SRC.BuildOrgPatch, {
   input: [org],
-  nodes: { CONFIG: cfg, Score: out },
+  nodes: { CONFIG: cfg, ParseScored: out },
 });
 
 const buildActivity = (out) => runCodeNode(SRC.BuildActivity, {
-  nodes: { CONFIG: cfg, Score: out },
+  nodes: { CONFIG: cfg, ParseScored: out },
 });
 
 const runSummary = (out, extra = {}) => runCodeNode(SRC.BuildRunSummary, {
-  nodes: { CONFIG: cfg, Score: out, ...extra },
+  nodes: { CONFIG: cfg, ParseScored: out, ...extra },
 });
 
 // ==========================================================================
@@ -680,32 +676,46 @@ describe('BuildNoWebsiteWrite — the skip leaves the same footprint as a score'
 });
 
 // ==========================================================================
-describe('ParseScored', () => {
-  test('a valid event parses and flattens every component the same way', () => {
-    const event = clayFixture('icp_scored_A.json');
-    const [out] = parseScored(event);
-    assert.equal(out.json._path, 'B');
-    assert.equal(out.json.model_version, 'v6');
-    assert.equal(out.json.requested_at, event.requested_at);
-    assert.equal(out.json.org_id, 10001, 'ids stay numeric through the boundary');
-
-    const c = out.json.components;
-    assert.deepEqual(Object.keys(c).sort(), [
-      'activation_state', 'buying_signal', 'company_type', 'geography',
-      'industry_vertical', 'revenue_range', 'stage_maturity',
-    ]);
-    assert.equal(c.industry_vertical.value, 'FinTech', 'a value component keeps its value');
-    assert.equal(c.company_type.value, 10, 'a levelled component exposes its level as value');
-    assert.equal(c.revenue_range.revenue_source, 'headcount_band');
-    assert.equal(c.activation_state.activation_evidence_dated, 'apollo.funding_events[0].date: 2025-09-01');
-    // buying_signal states no confidence; absence is recorded as null, never
-    // as "low" — there was no classifier to be unsure.
-    assert.equal(c.buying_signal.confidence, null);
+describe('ParseScored — the boundary, and now Path B\'s only thinking', () => {
+  test('a valid event parses flat, with the grade already made', () => {
+    const [out] = parseScored(clayFixture('icp_scored_A.json'));
+    const j = out.json;
+    assert.equal(j._path, 'B');
+    assert.equal(j._duplicate, false);
+    assert.equal(j.request_id, 'req-icp-0001');
+    assert.equal(j.org_id, 10001, 'ids stay numeric through the boundary');
+    assert.equal(j.deal_id, 55001);
+    assert.equal(j.final, 93);
+    assert.equal(j.grade, 'A');
+    assert.equal(j.status, 'scored');
+    assert.match(j.note, /^ICP v6 — Calculated: ICP A/);
   });
 
-  test('no score reaches ParseScored, and none leaves it', () => {
+  test('it computes nothing — there is no rubric left in n8n', () => {
+    // The whole point of the reversal. If a score ever appears here again,
+    // there are two implementations of one rubric pretending to be one.
     const [out] = parseScored(clayFixture('icp_scored_A.json'));
-    assert.equal(out.json.score, undefined, 'scoring is the Score node\'s job');
+    assert.equal(out.json.score, undefined, 'no score object');
+    assert.equal(out.json.composite, 92.5, 'the table\'s working is carried, not recomputed');
+    const source = readNode('ParseScored');
+    assert.ok(!/scoreFromComponents|activationStateFor/.test(source),
+      'ParseScored must not contain the scorer or the activation guard');
+  });
+
+  test('the note is carried byte for byte', () => {
+    for (const name of VALID_FIXTURES) {
+      const event = clayFixture(name);
+      const [out] = parseScored(event);
+      assert.equal(out.json.note, event.note, name);
+    }
+  });
+
+  test('absent working becomes null, never a guess', () => {
+    const [out] = parseScored(clayFixture('icp_scored_bare.json'));
+    for (const key of ['composite', 'multiplier', 'industry_level', 'activation_used', 'confidence_overall']) {
+      assert.equal(out.json[key], null, key);
+    }
+    assert.deepEqual(out.json.flags, [], 'flags default to empty, not null');
   });
 
   test('malformed -> a typed error naming every violation', () => {
@@ -713,13 +723,23 @@ describe('ParseScored', () => {
     assert.throws(() => parseScored(event), (error) => {
       assert.equal(error.name, 'IcpMalformedEvent');
       assert.match(error.message, /ICP_MALFORMED_EVENT/);
-      assert.ok(error.problems.length >= 6, `expected >= 6 problems, got ${error.problems.length}`);
+      assert.ok(error.problems.length >= 5, `expected >= 5 problems, got ${error.problems.length}`);
       assert.ok(error.problems.some((p) => /org_id must be a positive integer/.test(p)));
-      assert.ok(error.problems.some((p) => /engineering_hiring\.eng_open is missing/.test(p)));
-      assert.ok(error.problems.some((p) => /company_type\.level must be null or one of/.test(p)));
-      assert.ok(error.problems.some((p) => /revenue_range\.confidence must be one of/.test(p)));
-      assert.ok(error.problems.some((p) => /headcount_6mo_growth is missing/.test(p)));
-      assert.ok(error.problems.some((p) => /unknown top-level key/.test(p)));
+      assert.ok(error.problems.some((p) => /grade must be one of/.test(p)));
+      assert.ok(error.problems.some((p) => /stage_level must be null or one of/.test(p)));
+      assert.ok(error.problems.some((p) => /missing "note"/.test(p)));
+      assert.ok(error.problems.some((p) => /unknown top-level key "cls_all"/.test(p)));
+      return true;
+    });
+  });
+
+  test('the v6.0 shape is rejected — this is the regression that caused the rewrite', () => {
+    // Execution 60629: Path B answered Clay 200, wrote nothing, told nobody.
+    assert.throws(() => parseScored(clayFixture('icp_scored_v60_shape.json')), (error) => {
+      assert.equal(error.name, 'IcpMalformedEvent');
+      assert.ok(error.problems.some((p) => /missing "grade"/.test(p)));
+      assert.ok(error.problems.some((p) => /missing "note"/.test(p)));
+      assert.ok(error.problems.some((p) => /unknown top-level key "cls_all"/.test(p)));
       return true;
     });
   });
@@ -731,153 +751,21 @@ describe('ParseScored', () => {
     }
   });
 
-  test('a wrong model version is rejected', () => {
+  test('"scored" with a null grade never gets past the boundary', () => {
     const event = clayFixture('icp_scored_A.json');
-    event.model_version = 'v5';
-    assert.throws(() => parseScored(event), /model_version must be "v6"/);
+    event.grade = null;
+    assert.throws(() => parseScored(event), /status is "scored" but final or grade is null/);
   });
 
-  test('an off-ladder level is rejected', () => {
+  test('an empty note never gets past the boundary — the note IS the activity', () => {
     const event = clayFixture('icp_scored_A.json');
-    event.cls_all.geography.level = 5;
-    assert.throws(() => parseScored(event), /cls_all\.geography\.level must be null or one of/);
+    event.note = '';
+    assert.throws(() => parseScored(event), /note must be a non-empty string/);
   });
 });
 
 // ==========================================================================
-describe('Score', () => {
-  test('it runs the same arithmetic as engine/scoring.mjs, on every fixture', () => {
-    for (const name of VALID_FIXTURES) {
-      const out = scored(name);
-      const event = clayFixture(name);
-      const c = event.cls_all;
-      const guard = activationStateFor(
-        c.activation_state, event.apollo_summary, event.requested_at, cfg.activation_default
-      );
-      const conf = (x) => (x.confidence === undefined ? null : x.confidence);
-      const miss = (x) => x.missing_inputs || [];
-      const expected = score({
-        industry_vertical: c.industry_vertical.value,
-        levels: {
-          stage_maturity: c.stage_maturity.level, company_type: c.company_type.level,
-          geography: c.geography.level, revenue_range: c.revenue_range.level,
-          buying_signal: c.buying_signal.level,
-        },
-        activation_state: guard.state,
-        activation_evidence_dated_within_months: 0,
-        confidence: {
-          industry_vertical: conf(c.industry_vertical), stage_maturity: conf(c.stage_maturity),
-          company_type: conf(c.company_type), geography: conf(c.geography),
-          revenue_range: conf(c.revenue_range), buying_signal: conf(c.buying_signal),
-        },
-        missing_inputs: {
-          industry_vertical: miss(c.industry_vertical), stage_maturity: miss(c.stage_maturity),
-          company_type: miss(c.company_type), geography: miss(c.geography),
-          revenue_range: miss(c.revenue_range), buying_signal: miss(c.buying_signal),
-        },
-        facts_summary: {
-          revenue_usd: null,
-          headcount_total: event.apollo_summary.employees,
-          headcount_eng: event.apollo_summary.eng_headcount,
-        },
-      });
-      assert.equal(out.score.composite, expected.composite, name);
-      assert.equal(out.score.final_score, expected.final_score, name);
-      assert.equal(out.score.final_score_without_activation, expected.final_score_without_activation, name);
-      assert.equal(out.score.grade, expected.grade, name);
-      assert.equal(out.score.status, expected.status, name);
-      assert.equal(out.score.multiplier, expected.multiplier, name);
-      assert.equal(out.score.tier2_candidate, expected.tier2_candidate, name);
-      assert.equal(out.score.confidence_overall, expected.confidence_overall, name);
-      assert.deepEqual(out.score.levels, {
-        industries: expected.levels_used.industry,
-        stage_maturity: expected.levels_used.stage_maturity,
-        company_type: expected.levels_used.company_type,
-        geography: expected.levels_used.geography,
-        revenue_range: expected.levels_used.revenue_range,
-        buying_signal: expected.levels_used.buying_signal,
-      }, name);
-    }
-  });
-
-  test('A: an accelerating fintech grades A', () => {
-    const out = scored('icp_scored_A.json');
-    assert.equal(out.score.grade, 'A');
-    assert.equal(out.score.multiplier, 1);
-    assert.equal(out.score.contracting_guard_applied, false);
-  });
-
-  test('B_stable: the composite clears 75 and x0.80 puts it in B', () => {
-    const out = scored('icp_scored_B_stable.json');
-    assert.ok(out.score.composite >= 75, `composite ${out.score.composite}`);
-    assert.equal(out.score.multiplier, 0.8);
-    assert.equal(out.score.grade, 'B');
-    assert.ok(out.score.final_score_without_activation >= cfg.thresholds.A,
-      'and the counterfactual says it would have been an A');
-  });
-
-  test('contracting_valid: a measured 18% fall backs Contracting, and zeroes it', () => {
-    const out = scored('icp_scored_contracting_valid.json');
-    assert.equal(out.score.activation_state_used, 'Contracting');
-    assert.equal(out.score.contracting_guard_applied, false);
-    assert.equal(out.score.multiplier, 0);
-    assert.equal(out.score.final_score, 0);
-    assert.ok(out.score.final_score_without_activation > 0, 'the counterfactual survives the zero');
-  });
-
-  test('contracting_unbacked: growth of +5% downgrades the claim and flags it', () => {
-    const out = scored('icp_scored_contracting_unbacked.json');
-    assert.equal(out.score.activation_state_claimed, 'Contracting');
-    assert.equal(out.score.activation_state_used, 'Stable');
-    assert.equal(out.score.contracting_guard_applied, true);
-    assert.equal(out.score.multiplier, 0.8);
-    assert.ok(out.score.flags.includes('contracting_without_dated_evidence'));
-    assert.match(out.score.contracting_guard_reason, /0\.05 > -0\.15/);
-    assert.notEqual(out.score.final_score, 0, 'an unbacked claim must not zero an account');
-  });
-
-  test('insufficient: a low-confidence stage with gaps yields no grade', () => {
-    const out = scored('icp_scored_insufficient.json');
-    assert.equal(out.score.status, 'insufficient_data');
-    assert.equal(out.score.grade, null);
-    assert.ok(out.score.flags.some((f) => f.startsWith('insufficient:')));
-  });
-
-  test('tier2: revenue level 0 with 71000 employees flags tier 2', () => {
-    const out = scored('icp_scored_tier2.json');
-    assert.equal(out.score.levels.revenue_range, 0);
-    assert.ok(out.apollo_summary.employees > 1000);
-    assert.equal(out.score.tier2_candidate, true);
-    assert.ok(out.score.flags.includes('tier2_candidate'));
-  });
-
-  test('unknown_vertical: not in the v6 sub-rubric means level 0 and a flag', () => {
-    const out = scored('icp_scored_unknown_vertical.json');
-    assert.equal(out.components.industry_vertical.value, 'Horizontal B2B Software');
-    assert.equal(out.score.levels.industries, 0);
-    assert.ok(out.score.flags.includes('unknown_vertical'));
-    // Industry carries 15 of 100, so a strong account can still grade well —
-    // the flag is the signal, not the grade.
-    assert.equal(out.score.industry_tier, null);
-  });
-
-  test('the guard runs before the scorer, so the flag is raised exactly once', () => {
-    const out = scored('icp_scored_contracting_unbacked.json');
-    const raised = out.score.flags.filter((f) => f === 'contracting_without_dated_evidence');
-    assert.equal(raised.length, 1);
-  });
-
-  test('Score passes ParseScored\'s output through untouched', () => {
-    const [parsed] = parseScored(clayFixture('icp_scored_A.json'));
-    const out = scoreNode(parsed.json)[0].json;
-    for (const key of Object.keys(parsed.json)) {
-      assert.deepEqual(out[key], parsed.json[key], key);
-    }
-  });
-});
-
-// ==========================================================================
-describe('BuildOrgPatch — one field, and nothing else', () => {
+describe('BuildOrgPatch — two fields, written together, and nothing else', () => {
   const patchFor = (eventName, orgName = 'org_full.json', mutate = null) => {
     const out0 = scored(eventName);
     const { org } = orgFixture(orgName, cfg);
@@ -885,216 +773,118 @@ describe('BuildOrgPatch — one field, and nothing else', () => {
     return { out: orgPatch(out0, org)[0].json, parsed: out0, org };
   };
 
-  test('a scored run writes exactly TWO custom fields: the score and its date', () => {
+  test('it writes "<final> - <grade>" and today\'s date, together', () => {
     const { out } = patchFor('icp_scored_A.json');
-    assert.deepEqual(Object.keys(out.patch), ['custom_fields']);
-    assert.deepEqual(Object.keys(out.patch.custom_fields).sort(),
-      [cfg.f_auto_icp_score, cfg.f_auto_icp_scored_at].sort());
-    assert.equal(out.patch.custom_fields[cfg.f_auto_icp_score], '93 - A');
-    assert.equal(out.patch.custom_fields[cfg.f_auto_icp_scored_at], String(NOW_ISO).slice(0, 10));
+    assert.equal(out.auto_icp_score, '93 - A');
+    assert.equal(out.auto_icp_scored_at, NOW_ISO.slice(0, 10));
+    assert.deepEqual(
+      Object.keys(out.patch.custom_fields).sort(),
+      [...cfg.fields_written].sort()
+    );
   });
 
-  test('the two move together — never one without the other', () => {
-    // A score the gate can never age out, or a date that means nothing: both
-    // are worse than no write, so the node refuses a partial one by name.
-    const source = readNode('BuildOrgPatch');
-    assert.match(source, /ICP_PARTIAL_WRITE/);
-    for (const name of VALID_FIXTURES) {
-      const { out } = patchFor(name);
-      const keys = Object.keys(out.patch.custom_fields || {});
-      assert.ok(keys.length === 0 || keys.length === 2, `${name} wrote ${keys.length} field(s)`);
-    }
+  test('the number written is the table\'s, not one n8n derived', () => {
+    const event = clayFixture('icp_scored_A.json');
+    // A grade the rubric would never produce from these levels. It is written
+    // anyway, because the table owns the rubric now — that is the trade.
+    event.final = 41;
+    event.grade = 'C';
+    const { org } = orgFixture('org_full.json', cfg);
+    const out = orgPatch(scored(event), org)[0].json;
+    assert.equal(out.auto_icp_score, '41 - C');
   });
 
-  test('the format is "<final> - <grade>"', () => {
-    assert.equal(patchFor('icp_scored_A.json').out.auto_icp_score, '93 - A');
-    assert.equal(patchFor('icp_scored_B_stable.json').out.auto_icp_score, '74 - B');
-    assert.equal(patchFor('icp_scored_contracting_valid.json').out.auto_icp_score, '0 - C');
-    assert.equal(patchFor('icp_scored_tier2.json').out.auto_icp_score, '30 - C');
-  });
-
-  test('insufficient data writes the words, not a number', () => {
-    // "0 - C" would be a lie with the same shape as a real answer.
+  test('insufficient_data writes the label, never a grade-shaped lie', () => {
     const { out } = patchFor('icp_scored_insufficient.json');
-    assert.equal(out.auto_icp_score, 'n/a - insufficient data');
-    assert.equal(out.patch.custom_fields[cfg.f_auto_icp_score], 'n/a - insufficient data');
+    assert.equal(out.auto_icp_score, cfg.label_insufficient);
+    assert.ok(!/\d+ - [ABC]/.test(out.auto_icp_score));
   });
 
   test('Sales Rep ICP Score is never in the patch, and the node asserts it', () => {
-    for (const name of VALID_FIXTURES) {
-      const { out } = patchFor(name);
-      const keys = Object.keys(out.patch.custom_fields || {});
-      assert.ok(!keys.includes(cfg.f_sales_rep_icp_score), `${name} wrote the human's field`);
-    }
+    const { out } = patchFor('icp_scored_A.json');
+    assert.ok(!(cfg.f_sales_rep_icp_score in out.patch.custom_fields));
     const source = readNode('BuildOrgPatch');
-    assert.ok(source.includes('ICP_FORBIDDEN_WRITE'), 'asserted, not merely omitted');
-  });
-
-  test('only the two keys CONFIG names can ever appear', () => {
-    // An allow-list, not a deny-list: the five v5 fields are deleted from the
-    // account, and a deny-list would have to be maintained forever against
-    // fields that no longer exist.
-    for (const name of VALID_FIXTURES) {
-      const { out } = patchFor(name);
-      for (const key of Object.keys(out.patch.custom_fields || {})) {
-        assert.ok(cfg.fields_written.includes(key), `${name} wrote unlisted key ${key}`);
-      }
-    }
-    assert.deepEqual(cfg.fields_written, [cfg.f_auto_icp_score, cfg.f_auto_icp_scored_at]);
-  });
-
-  test('the patch carries NOTHING at the top level — no website, no label, no owner', () => {
-    // v6 makes an org mutation other than the one field impossible by shape.
-    for (const name of VALID_FIXTURES) {
-      const { out } = patchFor(name);
-      assert.deepEqual(Object.keys(out.patch), out.patch_is_empty ? [] : ['custom_fields'], name);
-    }
-  });
-
-  test('website and linkedin are no longer written, even when the org has neither', () => {
-    const { out } = patchFor('icp_scored_A.json', 'org_no_identifiers.json');
-    assert.deepEqual(Object.keys(out.patch), ['custom_fields']);
-    assert.equal(out.patch.website, undefined);
-    assert.equal(out.patch.linkedin, undefined);
-  });
-
-  test('no churn — the same score AND the same date produce {}', () => {
-    const { out } = patchFor('icp_scored_A.json', 'org_full.json', (org) => {
-      org.custom_fields[cfg.f_auto_icp_score] = '93 - A';
-      org.custom_fields[cfg.f_auto_icp_scored_at] = String(NOW_ISO).slice(0, 10);
-    });
-    assert.deepEqual(out.patch, {});
-    assert.equal(out.patch_is_empty, true);
-    assert.deepEqual(out.changed_fields, []);
-  });
-
-  test('the same grade on a LATER day still writes — the date is what changed', () => {
-    // And it has to: the date is what the next gate ages out. A re-score that
-    // refreshed the grade and not the clock would make the window meaningless.
-    const { out } = patchFor('icp_scored_A.json', 'org_full.json', (org) => {
-      org.custom_fields[cfg.f_auto_icp_score] = '93 - A';
-      org.custom_fields[cfg.f_auto_icp_scored_at] = '2026-01-01';
-    });
-    assert.equal(out.patch_is_empty, false);
-    assert.equal(out.patch.custom_fields[cfg.f_auto_icp_scored_at], String(NOW_ISO).slice(0, 10));
-    assert.equal(out.previous_auto_icp_scored_at, '2026-01-01');
-  });
-
-  test('a different value produces the write, and reports what it replaced', () => {
-    const { out } = patchFor('icp_scored_A.json', 'org_full.json', (org) => {
-      org.custom_fields[cfg.f_auto_icp_score] = '61 - B';
-    });
-    assert.equal(out.patch.custom_fields[cfg.f_auto_icp_score], '93 - A');
-    assert.equal(out.previous_auto_icp_score, '61 - B');
+    assert.ok(source.includes('ICP_FORBIDDEN_WRITE'));
+    assert.ok(source.includes('fields_never_write'));
   });
 
   test('a pre-existing Sales Rep ICP Score is left exactly as it was', () => {
-    const { out, org } = patchFor('icp_scored_A.json', 'org_full.json', (o) => {
-      o.custom_fields[cfg.f_sales_rep_icp_score] = '80 - A (Toby)';
+    const { out } = patchFor('icp_scored_A.json', 'org_full.json', (org) => {
+      org.custom_fields = { ...(org.custom_fields || {}), [cfg.f_sales_rep_icp_score]: '80 - A' };
     });
-    assert.equal(org.custom_fields[cfg.f_sales_rep_icp_score], '80 - A (Toby)');
-    assert.ok(!Object.keys(out.patch.custom_fields).includes(cfg.f_sales_rep_icp_score));
+    assert.ok(!(cfg.f_sales_rep_icp_score in out.patch.custom_fields));
+  });
+
+  test('the patch body carries nothing at the top level', () => {
+    const { out } = patchFor('icp_scored_A.json');
+    assert.deepEqual(Object.keys(out.patch), ['custom_fields']);
+  });
+
+  test('a re-score with the same value on the same day writes nothing', () => {
+    const { out } = patchFor('icp_scored_A.json', 'org_full.json', (org) => {
+      org.custom_fields = {
+        ...(org.custom_fields || {}),
+        [cfg.f_auto_icp_score]: '93 - A',
+        [cfg.f_auto_icp_scored_at]: NOW_ISO.slice(0, 10),
+      };
+    });
+    assert.equal(out.patch_is_empty, true);
+    assert.deepEqual(out.patch, {});
+  });
+
+  test('a changed grade writes BOTH fields, never one of them', () => {
+    const { out } = patchFor('icp_scored_A.json', 'org_full.json', (org) => {
+      org.custom_fields = {
+        ...(org.custom_fields || {}),
+        [cfg.f_auto_icp_score]: '56 - B',
+        [cfg.f_auto_icp_scored_at]: NOW_ISO.slice(0, 10),
+      };
+    });
+    assert.equal(out.patch_is_empty, false);
+    assert.equal(Object.keys(out.patch.custom_fields).length, 2);
   });
 });
 
 // ==========================================================================
-describe('BuildActivity — one activity, in plain words', () => {
-  const activityFor = (name) => buildActivity(scored(name))[0].json;
-
-  test('it is one done task carrying the body', () => {
-    const a = activityFor('icp_scored_A.json');
-    assert.equal(a.type, 'task');
-    assert.equal(a.subject, 'ICP scored');
-    assert.equal(a.done, true);
-    assert.ok(a.body.length > 0);
-  });
-
-  test('every body fits the 900-character budget', () => {
+describe('BuildActivity — the table\'s note, verbatim', () => {
+  test('the body is the event\'s note, byte for byte, on every fixture', () => {
+    // Not "resembles". Equal. v6.0 rendered its own prose here from the
+    // classifier output; there is one author of what a rep reads now.
     for (const name of VALID_FIXTURES) {
-      const a = activityFor(name);
-      assert.ok(a.body_length <= 900, `${name}: ${a.body_length} chars`);
+      const event = clayFixture(name);
+      const [out] = buildActivity(scored(name));
+      assert.equal(out.json.body, event.note, name);
+      assert.equal(out.json.chars, event.note.length, name);
+      assert.equal(out.json.verbatim, true, name);
     }
   });
 
-  test('exactly one CHECK line, always', () => {
-    for (const name of VALID_FIXTURES) {
-      const a = activityFor(name);
-      const checks = a.body.split('\n').filter((l) => l.startsWith('CHECK:'));
-      assert.equal(checks.length, 1, `${name} has ${checks.length} CHECK lines`);
-    }
-  });
-
-  test('no raw field names anywhere in the body', () => {
-    // The rule that shapes the whole node: the body is written from structured
-    // facts in plain words, never by passing evidence through.
-    const RAW = [
-      /\bli_[a-z_]+/, /\bapollo[._]/, /\beng_open/, /\beng_headcount/,
-      /\bheadcount_\d/, /\bfunding_events/, /\bmissing_inputs/, /\brevenue_estimate/,
-      /\bactivation_evidence/, /\brevenue_band_used/, /\brevenue_source/,
-      /\[\d+\]/, /_[a-z]+:/,
-    ];
-    for (const name of VALID_FIXTURES) {
-      const a = activityFor(name);
-      for (const pattern of RAW) {
-        assert.doesNotMatch(a.body, pattern, `${name}: ${pattern} in\n${a.body}`);
-      }
-    }
-  });
-
-  test('a discarded input is written as a sentence', () => {
-    const a = activityFor('icp_scored_A.json');
-    assert.match(a.body, /^We set aside Apollo revenue \$1\.1M — \$12k\/employee\.$/m);
-    assert.doesNotMatch(a.body, /discarded:/);
-  });
-
-  test('the activation block says what activation did to the score', () => {
-    assert.match(activityFor('icp_scored_A.json').body, /^Activation: accelerating, so the score stands in full\.$/m);
-    assert.match(activityFor('icp_scored_B_stable.json').body, /Activation: stable, which takes the score down from 93 to 74\./);
-    const zeroed = activityFor('icp_scored_contracting_valid.json').body;
-    assert.match(zeroed, /Activation: contracting, which zeroes the score\./);
-    assert.match(zeroed, /Without that it would have been 93\./);
-  });
-
-  test('an unbacked contracting call is explained, not hidden', () => {
-    const a = activityFor('icp_scored_contracting_unbacked.json');
-    assert.match(a.body, /nothing backed it up, so it was not applied/);
-    assert.match(a.check_line, /^CHECK: the contracting call was not backed/);
-  });
-
-  test('the CHECK line picks the most load-bearing doubt, in order', () => {
-    assert.match(activityFor('icp_scored_insufficient.json').check_line, /^CHECK: too little was found/);
-    assert.match(activityFor('icp_scored_unknown_vertical.json').check_line, /^CHECK: the vertical is not in our rubric/);
-    assert.match(activityFor('icp_scored_contracting_unbacked.json').check_line, /^CHECK: the contracting call/);
-    assert.match(activityFor('icp_scored_A.json').check_line, /^CHECK: the revenue band is an estimate from headcount/);
-    assert.match(activityFor('icp_scored_tier2.json').check_line, /^CHECK: large enough to be relationship-gated/);
-  });
-
-  test('the headline says the grade, or says it was not scored', () => {
-    assert.match(activityFor('icp_scored_A.json').body, /^ICP A — 93 out of 100\.$/m);
-    assert.match(activityFor('icp_scored_insufficient.json').body, /^Not scored — not enough was found/m);
-  });
-
-  test('no postings found reads as a sentence, never as zero', () => {
-    const a = activityFor('icp_scored_insufficient.json');
-    assert.match(a.body, /No job postings were found, which is not the same as none being open\./);
-  });
-
-  test('the same input yields the same body, trimmed the same way', () => {
-    const first = activityFor('icp_scored_A.json');
-    const second = activityFor('icp_scored_A.json');
-    assert.equal(first.body, second.body);
-  });
-
-  test('a pathological evidence string is trimmed by dropping sentences, not mid-word', () => {
+  test('a long note is NOT trimmed — verbatim means verbatim', () => {
     const event = clayFixture('icp_scored_A.json');
-    for (const component of ['industry_vertical', 'company_type', 'stage_maturity', 'revenue_range']) {
-      event.cls_all[component].evidence = [`something discarded: ${'x'.repeat(400)}`];
+    event.note = `${event.note}\n${'x'.repeat(4000)}`;
+    const [out] = buildActivity(scored(event));
+    assert.equal(out.json.body, event.note);
+    assert.ok(out.json.chars > 4000);
+  });
+
+  test('it renders nothing of its own', () => {
+    const source = readNode('BuildActivity');
+    for (const gone of ['component_scales', 'CHECK:', 'discarded', 'PROVIDERS', 'activity_max_chars']) {
+      assert.ok(!source.includes(gone), `BuildActivity still carries the renderer's ${gone}`);
     }
-    const a = buildActivity(scored(event))[0].json;
-    assert.ok(a.body_length <= 900);
-    assert.equal(a.body.split('\n').filter((l) => l.startsWith('CHECK:')).length, 1,
-      'the CHECK line survives any budget');
-    assert.match(a.body, /^ICP A — 93 out of 100\.$/m, 'and so does the headline');
+  });
+
+  test('subject and type come from CONFIG, and the activity is addressed', () => {
+    const [out] = buildActivity(scored('icp_scored_A.json'));
+    assert.equal(out.json.subject, cfg.activity_subject);
+    assert.equal(out.json.type, cfg.activity_type);
+    assert.equal(out.json.org_id, 10001);
+  });
+
+  test('an empty note is refused rather than posted as a blank activity', () => {
+    const parsed = scored('icp_scored_A.json');
+    parsed.note = '   ';
+    assert.throws(() => buildActivity(parsed), /ICP_EMPTY_NOTE/);
   });
 });
 
@@ -1102,128 +892,124 @@ describe('BuildActivity — one activity, in plain words', () => {
 describe('BuildRunSummary', () => {
   const EXPECTED_COLUMNS = [
     'ts', 'requested_at', 'request_id', 'execution_id', 'trigger', 'deal_id', 'org_id',
-    'domain', 'model_version',
-    'industry_vertical', 'industry_level', 'stage_level', 'type_level',
-    'geo_level', 'revenue_level', 'revenue_source', 'buying_level',
-    'eng_open', 'eng_open_60d_plus',
-    'activation_state', 'contracting_guard_applied', 'multiplier', 'composite', 'final',
-    'final_without_activation', 'grade', 'status', 'confidence_overall',
-    'tier2_candidate', 'flags', 'missing_inputs', 'evidence_json',
-    'patch_written', 'auto_icp_score', 'auto_icp_scored_at', 'activity_id', 'error',
+    'model_version',
+    'industry_level', 'stage_level', 'type_level', 'geo_level', 'revenue_level',
+    'activation_used', 'multiplier', 'composite', 'final', 'final_without_activation',
+    'grade', 'status', 'confidence_overall', 'tier2_candidate', 'flags',
+    'note_chars', 'patch_written', 'auto_icp_score', 'auto_icp_scored_at',
+    'activity_id', 'error',
   ];
 
-  test('every emitted value is a scalar a human can read in a trace', () => {
-    // No nested objects, no arrays: the summary is one flat line per run, and
-    // a nested value in it is a value nobody reads.
-    for (const name of VALID_FIXTURES) {
-      const [row] = runSummary(scored(name));
-      for (const [key, value] of Object.entries(row.json)) {
-        assert.ok(
-          value === null || ['string', 'number', 'boolean'].includes(typeof value),
-          `${name} / ${key} is ${typeof value}`
-        );
-      }
-    }
-  });
-
   test('the summary has its keys, in order', () => {
-    const out = scored('icp_scored_A.json');
-    const [row] = runSummary(out);
+    const [row] = runSummary(scored('icp_scored_A.json'));
     assert.deepEqual(Object.keys(row.json), EXPECTED_COLUMNS);
-    assert.equal(EXPECTED_COLUMNS.length, 37);
+    assert.equal(EXPECTED_COLUMNS.length, 29);
   });
 
-  test('a scored run fills the score columns', () => {
+  test('it records the table\'s working without acting on it', () => {
+    const [row] = runSummary(scored('icp_scored_A.json'));
+    assert.equal(row.json.final, 93);
+    assert.equal(row.json.grade, 'A');
+    assert.equal(row.json.composite, 92.5);
+    assert.equal(row.json.multiplier, 1);
+    assert.equal(row.json.industry_level, 10);
+    assert.equal(row.json.activation_used, 'Accelerating');
+  });
+
+  test('it records the note by LENGTH, not by repeating it', () => {
+    const event = clayFixture('icp_scored_A.json');
+    const [row] = runSummary(scored('icp_scored_A.json'));
+    assert.equal(row.json.note_chars, event.note.length);
+    assert.ok(!Object.values(row.json).includes(event.note), 'the text belongs in the activity');
+  });
+
+  test('a run that wrote nothing says so', () => {
+    const [row] = runSummary(scored('icp_scored_A.json'));
+    assert.equal(row.json.patch_written, false);
+    assert.equal(row.json.auto_icp_score, '');
+    assert.equal(row.json.activity_id, '');
+  });
+
+  test('a run that wrote carries the write through', () => {
     const out0 = scored('icp_scored_A.json');
     const { org } = orgFixture('org_full.json', cfg);
     const patch = orgPatch(out0, org)[0].json;
-    const activity = buildActivity(out0)[0].json;
     const [row] = runSummary(out0, {
-      BuildOrgPatch: patch, BuildActivity: activity, 'POST activity': { data: { id: 7788 } },
+      BuildOrgPatch: patch,
+      BuildActivity: buildActivity(out0)[0].json,
+      'POST activity': { data: { id: 9438 } },
     });
-    const r = row.json;
-    assert.equal(r.request_id, 'req-icp-0001');
-    assert.equal(r.trigger, 'clay.icp.scored');
-    assert.equal(r.industry_vertical, 'FinTech');
-    assert.equal(r.industry_level, 10);
-    assert.equal(r.grade, 'A');
-    assert.equal(r.status, 'scored');
-    assert.equal(r.multiplier, 1);
-    assert.equal(r.composite, 92.5);
-    assert.equal(r.final, 93);
-    assert.equal(r.patch_written, true);
-    assert.equal(r.activity_id, '7788');
-    assert.equal(r.auto_icp_score, '93 - A');
-    assert.equal(r.error, '');
-    assert.equal(r.execution_id, 'exec-test-0001');
+    assert.equal(row.json.patch_written, true);
+    assert.equal(row.json.auto_icp_score, '93 - A');
+    assert.equal(row.json.activity_id, '9438');
   });
 
-  test('a duplicate is flagged and patch_written is false', () => {
+  test('a duplicate is recorded as one, and reaches the summary', () => {
     const staticData = {};
     const event = clayFixture('icp_scored_A.json');
-    scored(event, staticData);
-    const out0 = scored(event, staticData);
-    assert.equal(out0._duplicate, true);
-    const [row] = runSummary(out0);
+    parseScored(event, staticData);
+    const [row] = runSummary(scored(event, staticData));
     assert.match(row.json.error, /duplicate/);
-    assert.equal(row.json.patch_written, false);
-    assert.equal(row.json.activity_id, '', 'a duplicate leaves no activity');
-    assert.equal(row.json.auto_icp_score, '', 'and writes no field');
   });
 
-  test('evidence_json covers the four classifiers and only those', () => {
-    const out = scored('icp_scored_A.json');
-    const [row] = runSummary(out);
-    const evidence = JSON.parse(row.json.evidence_json);
-    // v6 gives every component evidence, including the three the table levels
-    // itself, so all seven are recorded.
-    assert.deepEqual(Object.keys(evidence).sort(), [
-      'activation_state', 'buying_signal', 'company_type', 'geography',
-      'industry_vertical', 'revenue_range', 'stage_maturity',
-    ]);
-    assert.ok(Array.isArray(evidence.industry_vertical));
-    assert.ok(evidence.geography.length > 0);
-  });
-
-  test('missing_inputs is recorded per classifier', () => {
-    const out = scored('icp_scored_insufficient.json');
-    const [row] = runSummary(out);
-    assert.match(row.json.missing_inputs, /stage_maturity:funding_stage/);
-    assert.equal(row.json.grade, '', 'no grade on insufficient data');
-    assert.equal(row.json.status, 'insufficient_data');
-    // revenue_range is the component that made this insufficient, and in v6 it
-    // has no classifier to report a gap. The flag is where that survives.
-    assert.match(row.json.flags, /insufficient:[^|]*revenue_range/);
-  });
-
-  test("the table's conflict note is recorded in the error column", () => {
-    // v5 used this column for a score drift between Clay and n8n's recompute.
-    // v6 rejects a disagreeing score outright, so what lands here instead is
-    // the conflict the table itself reported — something that explains a score
-    // rather than contradicting it.
-    const out = scored('icp_scored_contracting_valid.json');
-    const [row] = runSummary(out);
-    assert.match(row.json.error, /^conflict:headcount fell 18%/);
-  });
-
-  test('the five v6 columns carry what they say', () => {
+  test('ids are strings in the row, numbers on the wire', () => {
     const [row] = runSummary(scored('icp_scored_A.json'));
-    assert.equal(row.json.requested_at, '2026-09-18T10:42:00Z');
-    assert.equal(row.json.revenue_source, 'headcount_band');
-    assert.equal(row.json.eng_open, 3);
-    assert.equal(row.json.eng_open_60d_plus, 2);
-    assert.equal(row.json.contracting_guard_applied, false);
-    assert.equal(runSummary(scored('icp_scored_contracting_unbacked.json'))[0].json.contracting_guard_applied, true);
+    assert.equal(row.json.org_id, '10001');
+    assert.equal(row.json.deal_id, '55001');
   });
 
-  test('an absent hiring count is -1, not 0', () => {
-    // A number column cannot hold "unknown" and 0 would be a lie: the provider
-    // returning nothing and a company having nothing open are opposite facts.
+  test('a null deal_id becomes an empty cell, never the string "null"', () => {
     const [row] = runSummary(scored('icp_scored_insufficient.json'));
-    assert.equal(row.json.eng_open, -1);
-    assert.equal(row.json.eng_open_60d_plus, -1);
-    assert.equal(runSummary(scored('icp_scored_contracting_valid.json'))[0].json.eng_open, 0,
-      'and a real zero is still a zero');
+    assert.equal(row.json.deal_id, '');
+  });
+
+  test('a key added to the row without a column fails loudly', () => {
+    const source = readNode('BuildRunSummary');
+    assert.match(source, /ICP_SUMMARY_DRIFT/);
+  });
+});
+
+// ==========================================================================
+describe('FailLoudly — a rejected event must not end as a success', () => {
+  const failFor = (item) => {
+    try {
+      runCodeNode(SRC.FailLoudly, { input: [item], nodes: { CONFIG: cfg } });
+    } catch (error) {
+      return error;
+    }
+    return null;
+  };
+
+  test('it always throws — that is the entire job', () => {
+    // Execution 60629: ParseScored rejected the event, the error branch ran to
+    // completion, and the execution ended SUCCESS — so settings.errorWorkflow
+    // never fired and WF-ERR never posted to Slack. n8n only alerts on a red
+    // execution, so the branch has to end red.
+    for (const item of [{}, { error_name: 'X' }, { org_id: 1 }]) {
+      const error = failFor(item);
+      assert.ok(error, `FailLoudly must throw on ${JSON.stringify(item)}`);
+      assert.equal(error.name, 'IcpRunFailed');
+    }
+  });
+
+  test('the message carries what a human needs before opening the execution', () => {
+    const error = failFor({
+      error_name: 'IcpMalformedEvent',
+      error_message: 'ICP_MALFORMED_EVENT: 2 problem(s)',
+      org_id: 22586,
+      request_id: 'req-7be8d908',
+      problems: ['missing "note"', 'unknown top-level key "cls_all"'],
+    });
+    assert.match(error.message, /ICP_RUN_FAILED/);
+    assert.match(error.message, /IcpMalformedEvent/);
+    assert.match(error.message, /org_id=22586/);
+    assert.match(error.message, /req-7be8d908/);
+    assert.match(error.message, /missing "note"/);
+    assert.match(error.message, /Clay was answered 200 and does not know/);
+  });
+
+  test('it says the organization was left alone', () => {
+    assert.match(failFor({}).message, /the organization was not written to/);
   });
 });
 
@@ -1265,6 +1051,68 @@ describe('BuildErrorContext — a failed run touches nothing', () => {
       assert.equal(out.error_name, 'IcpUnknownError');
       assert.equal(out.org_untouched, true);
     }
+  });
+
+  test('it re-derives the problem list by RE-VALIDATING the received body', () => {
+    // The error's own `.problems` and even its message are dropped crossing
+    // n8n's error output (execution 60648 arrived as "unknown error", zero
+    // problems). The body the webhook received is intact, and the validator is
+    // deterministic, so running it again gives back exactly the list the
+    // boundary refused the event for.
+    const v60 = clayFixture('icp_scored_v60_shape.json');
+    const out = runCodeNode(SRC.BuildErrorContext, {
+      input: [{ error: { name: 'Error', message: 'unknown error' } }],
+      nodes: { CONFIG: cfg, 'Webhook Clay': { body: v60 } },
+    })[0].json;
+    assert.equal(out.problems_source, 'revalidated');
+    assert.ok(out.problem_count >= 9, `expected the full list, got ${out.problem_count}`);
+    assert.ok(out.problems.some((p) => /missing "note"/.test(p)));
+    assert.ok(out.problems.some((p) => /unknown top-level key "cls_all"/.test(p)));
+  });
+
+  test('it recovers the org id from the webhook when the error lost it', () => {
+    // This is what made the failure activity land on NO organization at all
+    // (activity 46842, execution 60629).
+    const out = runCodeNode(SRC.BuildErrorContext, {
+      input: [{ error: { name: 'Error', message: 'unknown error' } }],
+      nodes: { CONFIG: cfg, 'Webhook Clay': { body: { org_id: 22586, request_id: 'req-x' } } },
+    })[0].json;
+    assert.equal(out.org_id, 22586);
+    assert.equal(out.request_id, 'req-x');
+  });
+
+  test('a real error keeps its own problem list rather than re-deriving one', () => {
+    const out = runCodeNode(SRC.BuildErrorContext, {
+      input: [{ error: { name: 'IcpMalformedEvent', message: 'm', problems: ['a', 'b'] } }],
+      nodes: { CONFIG: cfg },
+    })[0].json;
+    assert.equal(out.problems_source, 'error');
+    assert.deepEqual(out.problems, ['a', 'b']);
+  });
+
+  test('a failed run RELEASES its dedupe key, so a fix can be re-sent', () => {
+    // Dedupe writes the key on receipt, before anything has judged the
+    // payload. Without this, a rejected request_id stays claimed for 48 hours
+    // and Clay's corrected redelivery is dropped as a duplicate — silently.
+    // A run that failed did not happen.
+    const staticData = { global: { seen: { 'clay:scored:req-x:-': 1 }, hourly: {} } };
+    const out = runCodeNode(SRC.BuildErrorContext, {
+      input: [{ _dedupe_key: 'clay:scored:req-x:-', error: { name: 'E', message: 'm' } }],
+      nodes: { CONFIG: cfg },
+      staticData,
+    })[0].json;
+    assert.equal(out.dedupe_key_released, 'clay:scored:req-x:-');
+    assert.equal(staticData.global.seen['clay:scored:req-x:-'], undefined, 'the key must be gone');
+  });
+
+  test('releasing is a no-op when there is no key to release', () => {
+    const staticData = { global: { seen: {}, hourly: {} } };
+    const out = runCodeNode(SRC.BuildErrorContext, {
+      input: [{ error: { name: 'E', message: 'm' } }],
+      nodes: { CONFIG: cfg },
+      staticData,
+    })[0].json;
+    assert.equal(out.dedupe_key_released, null);
   });
 
   test('it caps the problem list so one bad event cannot fill the audit row', () => {

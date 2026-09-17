@@ -1,19 +1,13 @@
-// BuildRunSummary — one flat object per Path B run: what was decided, from
-// what, and what it changed.
+// BuildRunSummary — the terminal node on Path B: one flat row describing what
+// this run did.
 //
-// This is the END of the line. Its output is the run's trace, and it lands in
-// the n8n execution, which is where a disputed score is read from. There is no
-// table: the Data Table sink was dropped so that a Path B run has no node that
-// can go red for a reason unrelated to the score.
+// It is a summary, not a store. The audit Data Table was dropped, so nothing
+// is appended anywhere; this row exists so that opening an execution shows the
+// whole decision in one object instead of five nodes deep. If an audit store
+// comes back, this is what it writes.
 //
-// Written for EVERY run, including a dropped duplicate (flagged in `error`). A
-// dedupe that leaves no trace is indistinguishable from a lost event when
-// someone asks why an organization was not scored.
-//
-// The key ORDER is fixed and asserted by tests/static/nodes_execute.test.mjs.
-// It buys nothing mechanically now that nothing consumes the row positionally;
-// what it buys is a trace that reads the same way every time, and an added key
-// that shows up as a failing test rather than as a quiet change of shape.
+// Every key is present on every run, in a fixed order. A column that is
+// sometimes absent is a column nobody can filter on.
 
 // CONFIG on Path A, CONFIG B on Path B. The two Set nodes hold the same JSON,
 // but a Code node may only reference a node that is CONNECTED upstream of it:
@@ -31,12 +25,11 @@ if (cfg === null || cfg === undefined) {
 if (cfg === null || cfg === undefined) {
   throw new Error('ICP_NO_CONFIG: neither CONFIG nor CONFIG B is upstream of this node');
 }
-// Score's output is ParseScored's, plus the grade — so one lookup gets both
-// the classifier evidence and the number it produced.
-const parsed = $('Score').item.json;
 
-// The patch and note nodes do not run on a duplicate or an error branch, so
-// read them defensively rather than assuming the happy path.
+const parsed = $('ParseScored').item.json;
+
+// Reached on the duplicate branch too, where no write was attempted — so both
+// lookups are optional and their absence is itself a fact worth recording.
 let patch = null;
 try { patch = $('BuildOrgPatch').item.json; } catch (e) { patch = null; }
 let activity = null;
@@ -44,57 +37,24 @@ try { activity = $('BuildActivity').item.json; } catch (e) { activity = null; }
 let activityResponse = null;
 try { activityResponse = $('POST activity').item.json; } catch (e) { activityResponse = null; }
 
-const score = parsed.score;
-const components = parsed.components;
-const levels = score.levels;
-
 const COLUMNS = [
   'ts', 'requested_at', 'request_id', 'execution_id', 'trigger', 'deal_id', 'org_id',
-  'domain', 'model_version',
-  'industry_vertical', 'industry_level', 'stage_level', 'type_level',
-  'geo_level', 'revenue_level', 'revenue_source', 'buying_level',
-  'eng_open', 'eng_open_60d_plus',
-  'activation_state', 'contracting_guard_applied', 'multiplier', 'composite', 'final',
-  'final_without_activation', 'grade', 'status', 'confidence_overall',
-  'tier2_candidate', 'flags', 'missing_inputs', 'evidence_json',
-  'patch_written', 'auto_icp_score', 'auto_icp_scored_at', 'activity_id', 'error',
+  'model_version',
+  'industry_level', 'stage_level', 'type_level', 'geo_level', 'revenue_level',
+  'activation_used', 'multiplier', 'composite', 'final', 'final_without_activation',
+  'grade', 'status', 'confidence_overall', 'tier2_candidate', 'flags',
+  'note_chars', 'patch_written', 'auto_icp_score', 'auto_icp_scored_at',
+  'activity_id', 'error',
 ];
-
-// Collapse every component's gaps into one auditable string.
-const missing = [];
-for (const component of Object.keys(components)) {
-  if (components[component].computed_by_table) continue;
-  const items = components[component].missing_inputs || [];
-  if (items.length > 0) missing.push(`${component}:${items.join('|')}`);
-}
-
-// Evidence as JSON so a row stays one cell and stays machine-readable.
-const evidence = {};
-for (const component of Object.keys(components)) {
-  // A component the table computed has no evidence by construction. Writing
-  // `"geography": []` into every row would suggest the evidence was looked for
-  // and not found, which is not what happened.
-  if (components[component].computed_by_table) continue;
-  evidence[component] = components[component].evidence || [];
-}
 
 const errorBits = [];
 if (parsed._duplicate) errorBits.push('duplicate');
 if (parsed._rate_exceeded) errorBits.push(`rate_exceeded:${parsed._rate_this_hour}/h`);
-// v5 recorded a drift between Clay's score and n8n's recompute here. v6 has no
-// recompute to disagree with: a score that does not match the rubric is
-// rejected outright by ParseScored and never reaches this node. What takes its
-// place is the table's own conflict note, which explains a score rather than
-// contradicting it.
-if (parsed.conflict_note) errorBits.push(`conflict:${parsed.conflict_note}`);
 
-// -1 means "the jobs provider returned nothing"; 0 means "it returned nothing
-// open". They are opposite facts and a summary that prints 0 for both is lying
-// about one — which is exactly how stage_maturity went wrong on Akuvo. The
-// sentinel survives the Data Table being dropped because the distinction was
-// never about the table: it is about the two facts.
-const count = (v) => (v === null || v === undefined ? -1 : v);
-const hiring = parsed.hiring || {};
+// Numbers stay numbers; only the ids become strings, because a column that is
+// sometimes empty cannot be a number column.
+const id = (v) => (v === null || v === undefined ? '' : String(v));
+const num = (v) => (v === null || v === undefined ? '' : v);
 
 const row = {
   ts: cfg.now_iso,
@@ -102,56 +62,50 @@ const row = {
   request_id: parsed.request_id,
   execution_id: $execution.id,
   trigger: `clay.${cfg.clay_event_name}`,
-  // Numeric on the wire, string in the table: these are identifiers, and a
-  // column that is sometimes empty cannot be a number column.
-  deal_id: parsed.deal_id === null || parsed.deal_id === undefined ? '' : String(parsed.deal_id),
-  org_id: String(parsed.org_id),
-  domain: parsed.domain,
+  deal_id: id(parsed.deal_id),
+  org_id: id(parsed.org_id),
   model_version: parsed.model_version,
 
-  industry_vertical: components.industry_vertical.value === null ? '' : components.industry_vertical.value,
-  industry_level: levels.industries,
-  stage_level: levels.stage_maturity,
-  type_level: levels.company_type,
-  geo_level: levels.geography,
-  revenue_level: levels.revenue_range,
-  revenue_source: (components.revenue_range || {}).revenue_source || '',
-  buying_level: levels.buying_signal,
+  // The working, as the table showed it. Recorded, never acted on: nothing in
+  // this workflow re-derives the grade from these, which is the whole point of
+  // the table owning the rubric.
+  industry_level: num(parsed.industry_level),
+  stage_level: num(parsed.stage_level),
+  type_level: num(parsed.type_level),
+  geo_level: num(parsed.geo_level),
+  revenue_level: num(parsed.revenue_level),
+  activation_used: parsed.activation_used || '',
+  multiplier: num(parsed.multiplier),
+  composite: num(parsed.composite),
+  final: num(parsed.final),
+  final_without_activation: num(parsed.final_without_activation),
+  grade: parsed.grade || '',
+  status: parsed.status,
+  confidence_overall: parsed.confidence_overall || '',
+  tier2_candidate: parsed.tier2_candidate === true,
+  flags: (parsed.flags || []).join('|'),
 
-  eng_open: count(hiring.eng_open),
-  eng_open_60d_plus: count(hiring.eng_open_60d_plus),
+  // The note is written verbatim, so its length is the only thing worth
+  // recording here — repeating the text would make the row unreadable and say
+  // nothing the activity does not already say.
+  note_chars: typeof parsed.note === 'string' ? parsed.note.length : 0,
 
-  activation_state: score.activation_state_used,
-  contracting_guard_applied: score.contracting_guard_applied === true,
-  multiplier: score.multiplier,
-  composite: score.composite,
-  final: score.final_score,
-  final_without_activation: score.final_score_without_activation,
-  grade: score.grade === null ? '' : score.grade,
-  status: score.status,
-  confidence_overall: score.confidence_overall,
-  tier2_candidate: score.tier2_candidate,
-
-  flags: (score.flags || []).join('|'),
-  missing_inputs: missing.join(' · '),
-  evidence_json: JSON.stringify(evidence),
-
-  patch_written: patch === null ? false : patch.patch_is_empty === false,
-  activity_id: activityResponse && (activityResponse.id || (activityResponse.data && activityResponse.data.id))
-    ? String(activityResponse.id || activityResponse.data.id)
-    : '',
-  auto_icp_score: patch === null ? '' : String(patch.auto_icp_score || ''),
-  auto_icp_scored_at: patch === null ? '' : String(patch.auto_icp_scored_at || ''),
-  error: errorBits.join(' · '),
+  patch_written: Boolean(patch && patch.patch_is_empty === false),
+  auto_icp_score: (patch && patch.auto_icp_score) || '',
+  auto_icp_scored_at: (patch && patch.auto_icp_scored_at) || '',
+  activity_id: activityResponse && activityResponse.data && activityResponse.data.id
+    ? String(activityResponse.data.id)
+    : (activity ? 'not-posted' : ''),
+  error: errorBits.join(';'),
 };
 
-// Emit in COLUMNS order, for the human reading the execution.
+// Fixed order, asserted rather than assumed: a row whose keys drift is a row
+// that silently stops lining up with every row before it.
 const ordered = {};
 for (const column of COLUMNS) ordered[column] = row[column];
-
-const missingColumns = COLUMNS.filter((c) => !Object.prototype.hasOwnProperty.call(row, c));
-if (missingColumns.length > 0) {
-  throw new Error(`ICP_SUMMARY_KEY_MISSING: ${missingColumns.join(', ')}`);
+const extra = Object.keys(row).filter((k) => COLUMNS.indexOf(k) === -1);
+if (extra.length > 0) {
+  throw new Error(`ICP_SUMMARY_DRIFT: ${JSON.stringify(extra)} is not in COLUMNS`);
 }
 
-return [{ json: ordered, pairedItem: { item: 0 } }];
+return [{ json: ordered }];

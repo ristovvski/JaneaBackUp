@@ -9,19 +9,19 @@
 // Both copies are therefore SPLICED IN from their single source:
 //
 //   BuildClayRequest.js  <- engine/normalize.mjs, verbatim minus `export`
-//   ParseScored.js       <- engine/validate_event.mjs, the v6 boundary check
+//   ParseScored.js       <- engine/validate_event.mjs, the Path B boundary
 //
-// v5 spliced the scorer here so n8n could recompute and flag drift. v6 sends
-// three of the six levels already computed, so there is nothing to recompute
-// from; what ships instead is the validator, and the rule that rejects an
-// event is the same source its unit tests exercise.
+// v5 spliced the SCORER here so n8n could recompute Clay's grade and flag
+// drift. v6.0 went further and moved scoring into n8n outright. Both are gone:
+// the table scores, n8n writes, and the only thing spliced now is the
+// validator — the rule that rejects an event is the same source its unit tests
+// exercise.
 //
 // Run: npm run gen:nodes
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { BEGIN, END } from './gen_clay_formula.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const NODES = join(ROOT, 'n8n', 'nodes');
@@ -64,40 +64,12 @@ function inlineValidator() {
   if (/^\s*import\s/m.test(source)) {
     throw new Error('engine/validate_event.mjs gained an import — it can no longer be inlined into a Code node');
   }
-  const start = source.indexOf('export const STATES');
-  if (start === -1) throw new Error('cannot find STATES in engine/validate_event.mjs');
+  const start = source.indexOf('export const GRADES');
+  if (start === -1) throw new Error('cannot find GRADES in engine/validate_event.mjs');
   return source.slice(start).replace(/^export /gm, '');
 }
 
-// ---------------------------------------------------------------------------
-// engine/scoring.mjs's arithmetic, ready to inline as a function
-//
-// Spliced from engine/clay_formula.txt, whose body
-// tests/contract/clay_parity.test.mjs already asserts is deep-equal to
-// engine/scoring.mjs over 500 generated inputs. So the Score node runs the
-// implementation the parity suite is written against, not a copy of it.
-// ---------------------------------------------------------------------------
-function inlineScorer() {
-  const formula = readFileSync(join(ROOT, 'engine', 'clay_formula.txt'), 'utf8');
-  const from = formula.indexOf(BEGIN);
-  const to = formula.indexOf(END);
-  if (from === -1 || to === -1) throw new Error('markers missing from engine/clay_formula.txt');
-  const body = formula.slice(from + BEGIN.length, to);
-  return `function scoreFromComponents(inputs) {\n${indent(body.trim(), '  ')}\n}`;
-}
 
-// ---------------------------------------------------------------------------
-// engine/activation_guard.mjs, ready to inline
-// ---------------------------------------------------------------------------
-function inlineActivationGuard() {
-  const source = readFileSync(join(ROOT, 'engine', 'activation_guard.mjs'), 'utf8');
-  if (/^\s*import\s/m.test(source)) {
-    throw new Error('engine/activation_guard.mjs gained an import — it can no longer be inlined');
-  }
-  const start = source.indexOf('export const HEADCOUNT_CONTRACTION_THRESHOLD');
-  if (start === -1) throw new Error('cannot find HEADCOUNT_CONTRACTION_THRESHOLD in engine/activation_guard.mjs');
-  return source.slice(start).replace(/^export /gm, '');
-}
 
 // ===========================================================================
 // BuildClayRequest
@@ -203,17 +175,13 @@ return [{
 // ParseScored
 // ===========================================================================
 const parseScored = `${BANNER(['engine/validate_event.mjs'])}//
-// ParseScored — Path B's boundary. It validates the v6 event and rejects it on
-// any mismatch; it does not produce a score of its own.
+// ParseScored — Path B's boundary, and now its only thinking.
 //
-// v5 recomputed. It could: seven classifier objects arrived and n8n re-derived
-// the composite from them, flagging a disagreement with Clay's formula column.
-// v6 removes the inputs that made that possible — geography, revenue_range and
-// buying_signal are levelled inside the table and arrive already scored — so a
-// recompute would have nothing to recompute FROM. The check that remains is
-// the one that still means something: is the posted score internally
-// consistent with the rubric this workflow holds? If not, the event does not
-// get written. A wrong grade in the CRM is worse than a loud failure.
+// The table scores. This node checks that what arrived is something that can
+// be WRITTEN — a grade, a status, a note — and then hands it on flat. It
+// computes nothing: v6.0 had a Score node holding the rubric, and running a
+// second rubric in n8n to agree with Clay's was two implementations pretending
+// to be one.
 //
 // The validator is spliced from engine/validate_event.mjs, which has its own
 // unit tests, so the rule that rejects an event is the rule the tests exercise.
@@ -243,8 +211,8 @@ const problems = validateEvent(raw, cfg);
 
 if (problems.length > 0) {
   const error = new Error(
-    \`ICP_MALFORMED_EVENT: \${problems.length} problem(s) in the \${cfg.model_version} \` +
-    \`scored event for request_id=\${raw.request_id || '(none)'}: \${problems.join('; ')}\`
+    \`ICP_MALFORMED_EVENT: \${problems.length} problem(s) in the scored event for \` +
+    \`request_id=\${raw.request_id || '(none)'}: \${problems.join('; ')}\`
   );
   error.name = 'IcpMalformedEvent';
   error.problems = problems;
@@ -253,41 +221,9 @@ if (problems.length > 0) {
   throw error;
 }
 
-const cls = raw.cls_all;
-const hiring = cls.engineering_hiring;
-
-// One flat view of the seven components, so the Score node, the note and the
-// audit row all read them the same way whether a component carries a \`value\`
-// or a \`level\`, and whether or not it states a confidence. A component that
-// states none is recorded as null rather than as "low": there was no
-// classifier to be unsure, and reading absence as doubt would put three
-// components on the Missing line of every note ever written.
-const flat = (name, valueKey) => {
-  const c = cls[name] || {};
-  return {
-    value: c[valueKey] === undefined ? null : c[valueKey],
-    evidence: c.evidence || [],
-    confidence: c.confidence === undefined ? null : c.confidence,
-    missing_inputs: c.missing_inputs || [],
-  };
-};
-
-const components = {
-  industry_vertical: flat('industry_vertical', 'value'),
-  company_type: flat('company_type', 'level'),
-  stage_maturity: flat('stage_maturity', 'level'),
-  geography: flat('geography', 'level'),
-  revenue_range: Object.assign(flat('revenue_range', 'level'), {
-    revenue_band_used: cls.revenue_range.revenue_band_used === undefined ? null : cls.revenue_range.revenue_band_used,
-    revenue_source: cls.revenue_range.revenue_source === undefined ? null : cls.revenue_range.revenue_source,
-  }),
-  buying_signal: flat('buying_signal', 'level'),
-  activation_state: Object.assign(flat('activation_state', 'value'), {
-    activation_evidence_dated: cls.activation_state.activation_evidence_dated === undefined
-      ? null
-      : cls.activation_state.activation_evidence_dated,
-  }),
-};
+// Flat, and in one place, so BuildOrgPatch / BuildActivity / BuildRunSummary
+// all read the same object rather than three readings of the raw body.
+const opt = (key) => (raw[key] === undefined ? null : raw[key]);
 
 return [{
   json: {
@@ -298,166 +234,70 @@ return [{
     _rate_exceeded: item._rate_exceeded === true,
 
     request_id: raw.request_id,
-    event_id: raw.event_id === undefined ? null : raw.event_id,
     org_id: raw.org_id,
     deal_id: raw.deal_id === undefined ? null : raw.deal_id,
     requested_at: raw.requested_at,
-    domain: raw.domain,
 
-    resolved: raw.resolved,
-    cls_all: cls,
-    components: components,
-    hiring: hiring,
-    conflict_note: cls.conflict_note === undefined ? null : cls.conflict_note,
-    apollo_summary: raw.apollo_summary,
-    clay_table: raw.clay_table === undefined ? null : raw.clay_table,
-    model_version: raw.model_version,
+    final: raw.final,
+    grade: raw.grade,
+    status: raw.status,
+    // Verbatim. Not trimmed, not reflowed, not re-rendered. The table wrote
+    // what the rep reads and there is exactly one author of it.
+    note: raw.note,
+
+    composite: opt('composite'),
+    multiplier: opt('multiplier'),
+    final_without_activation: opt('final_without_activation'),
+    industry_level: opt('industry_level'),
+    stage_level: opt('stage_level'),
+    type_level: opt('type_level'),
+    geo_level: opt('geo_level'),
+    revenue_level: opt('revenue_level'),
+    activation_used: opt('activation_used'),
+    confidence_overall: opt('confidence_overall'),
+    tier2_candidate: opt('tier2_candidate'),
+    flags: raw.flags === undefined || raw.flags === null ? [] : raw.flags,
+
+    model_version: cfg.model_version,
   },
 }];
 `;
 
 // ===========================================================================
-// Score
+// BuildErrorContext
 // ===========================================================================
-const scoreNode = `${BANNER(['engine/clay_formula.txt (portable body)', 'engine/activation_guard.mjs'])}//
-// Score — the grade, computed HERE.
 //
-// v5 had Clay own a formula column and n8n recompute it as a drift guard. v6
-// removes the duplication instead of policing it: the table classifies and
-// enriches, this node scores, and there is exactly one implementation of the
-// rubric in the delivery path.
+// Generated for ONE reason: so the validator can be spliced into it.
 //
-// The arithmetic below is spliced from engine/clay_formula.txt, whose body
-// tests/contract/clay_parity.test.mjs asserts is deep-equal to
-// engine/scoring.mjs over 500 generated inputs — so this is not a
-// reimplementation, it is the tested implementation with the module wrapper
-// removed. tests/static/nodes_execute.test.mjs runs the two side by side on
-// every fixture.
-
-// CONFIG on Path A, CONFIG B on Path B. The two Set nodes hold the same JSON,
-// but a Code node may only reference a node that is CONNECTED upstream of it:
-// n8n raises a "no connection" expression error otherwise, and in the task
-// runner that error's own constructor then throws
-// \`Cannot assign to read only property 'name'\`, which hides the real message
-// completely. A node that runs on both paths therefore has to ask for
-// whichever CONFIG is upstream of it. Kept byte-identical across the nodes
-// that need it; tests/static/workflow_review.test.mjs enforces that.
-let cfg = null;
-try { cfg = $('CONFIG').item.json; } catch (e) { cfg = null; }
-if (cfg === null || cfg === undefined) {
-  try { cfg = $('CONFIG B').item.json; } catch (e) { cfg = null; }
+// n8n's task runner does not carry a thrown error's own properties across an
+// error output. Execution 60648 threw an IcpMalformedEvent listing every
+// violation; what arrived at this node was "unknown error", zero problems, and
+// the Slack alert that came out of it told nobody anything they could act on.
+//
+// So this node does not try to recover the problem list from the error. It
+// re-runs the same validator over the body the webhook received — intact
+// whatever failed downstream — and gets the list back in full.
+//
+// The skeleton lives in n8n/nodes/src/BuildErrorContext.src.js with a
+// @@VALIDATOR@@ marker, rather than being a template literal here, because a
+// node whose own comments contain backticks and ${...} cannot survive being
+// one.
+function buildErrorContextSource() {
+  const skeleton = readFileSync(join(ROOT, 'n8n', 'nodes', 'src', 'BuildErrorContext.src.js'), 'utf8');
+  if (!skeleton.includes('@@VALIDATOR@@')) {
+    throw new Error('BuildErrorContext.src.js lost its @@VALIDATOR@@ marker');
+  }
+  return BANNER(['n8n/nodes/src/BuildErrorContext.src.js', 'engine/validate_event.mjs'])
+    + skeleton.replace('// @@VALIDATOR@@', inlineValidator());
 }
-if (cfg === null || cfg === undefined) {
-  throw new Error('ICP_NO_CONFIG: neither CONFIG nor CONFIG B is upstream of this node');
-}
-const parsed = $input.first().json;
-
-${inlineScorer()}
-
-${inlineActivationGuard()}
-
-const c = parsed.components;
-const apollo = parsed.apollo_summary || {};
-
-// ---------------------------------------------------------------------------
-// The Contracting guard runs BEFORE the scorer, and the scorer's own v5
-// dated-evidence rule is then bypassed by construction: it is handed the state
-// the guard settled on, with an evidence age of 0, so it cannot downgrade a
-// second time and cannot raise the flag twice.
-// ---------------------------------------------------------------------------
-const guard = activationStateFor(
-  cls_allActivation(parsed),
-  apollo,
-  parsed.requested_at,
-  cfg.activation_default
-);
-
-function cls_allActivation(p) {
-  const a = (p.cls_all || {}).activation_state || {};
-  return {
-    value: a.value === undefined ? null : a.value,
-    activation_evidence_dated: a.activation_evidence_dated === undefined ? null : a.activation_evidence_dated,
-  };
-}
-
-const scored = scoreFromComponents({
-  industry_vertical: c.industry_vertical.value,
-  levels: {
-    stage_maturity: c.stage_maturity.value,
-    company_type: c.company_type.value,
-    geography: c.geography.value,
-    revenue_range: c.revenue_range.value,
-    buying_signal: c.buying_signal.value,
-  },
-  activation_state: guard.state,
-  activation_evidence_dated_within_months: 0,
-  confidence: {
-    industry_vertical: c.industry_vertical.confidence,
-    stage_maturity: c.stage_maturity.confidence,
-    company_type: c.company_type.confidence,
-    geography: c.geography.confidence,
-    revenue_range: c.revenue_range.confidence,
-    buying_signal: c.buying_signal.confidence,
-  },
-  missing_inputs: {
-    industry_vertical: c.industry_vertical.missing_inputs,
-    stage_maturity: c.stage_maturity.missing_inputs,
-    company_type: c.company_type.missing_inputs,
-    geography: c.geography.missing_inputs,
-    revenue_range: c.revenue_range.missing_inputs,
-    buying_signal: c.buying_signal.missing_inputs,
-  },
-  // The tier-2 rule reads a revenue NUMBER and a headcount. v6 sends a revenue
-  // BAND, so the revenue half of the rule cannot fire and the headcount half
-  // does the work — which is what the task's tier2 case describes: revenue
-  // level 0, employees over a thousand.
-  facts_summary: {
-    revenue_usd: null,
-    headcount_total: apollo.employees === undefined ? null : apollo.employees,
-    headcount_eng: apollo.eng_headcount === undefined ? null : apollo.eng_headcount,
-  },
-});
-
-const flags = scored.flags.slice();
-if (guard.guard_applied && flags.indexOf('contracting_without_dated_evidence') === -1) {
-  flags.push('contracting_without_dated_evidence');
-}
-
-const score = {
-  levels: {
-    industries: scored.levels_used.industry,
-    stage_maturity: scored.levels_used.stage_maturity,
-    company_type: scored.levels_used.company_type,
-    geography: scored.levels_used.geography,
-    revenue_range: scored.levels_used.revenue_range,
-    buying_signal: scored.levels_used.buying_signal,
-  },
-  industry_tier: scored.industry_tier,
-  composite: scored.composite,
-  activation_state_claimed: (parsed.cls_all.activation_state || {}).value || null,
-  activation_state_used: scored.activation_state_used,
-  contracting_guard_applied: guard.guard_applied,
-  contracting_guard_reason: guard.reason,
-  multiplier: scored.multiplier,
-  final_score: scored.final_score,
-  final_score_without_activation: scored.final_score_without_activation,
-  grade: scored.grade,
-  status: scored.status,
-  confidence_overall: scored.confidence_overall,
-  tier2_candidate: scored.tier2_candidate,
-  flags,
-  model_version: cfg.model_version,
-};
-
-return [{ json: Object.assign({}, parsed, { score }) }];
-`;
+const buildErrorContext = buildErrorContextSource();
 
 writeFileSync(join(NODES, 'BuildClayRequest.js'), buildClayRequest, 'utf8');
 writeFileSync(join(NODES, 'ParseScored.js'), parseScored, 'utf8');
-writeFileSync(join(NODES, 'Score.js'), scoreNode, 'utf8');
+writeFileSync(join(NODES, 'BuildErrorContext.js'), buildErrorContext, 'utf8');
 
 process.stdout.write(
   `wrote n8n/nodes/BuildClayRequest.js (${buildClayRequest.length} bytes)\n` +
   `wrote n8n/nodes/ParseScored.js (${parseScored.length} bytes)\n` +
-  `wrote n8n/nodes/Score.js (${scoreNode.length} bytes)\n`
+  `wrote n8n/nodes/BuildErrorContext.js (${buildErrorContext.length} bytes)\n`
 );

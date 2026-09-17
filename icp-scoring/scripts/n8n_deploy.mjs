@@ -104,6 +104,55 @@ for (const node of live.nodes) {
   }
 }
 
+// A type this workflow does not yet carry is looked up across the INSTANCE.
+//
+// The Slack alert node shipped with a placeholder credential and no live
+// counterpart, so every deploy dropped it — and the node then answered
+// "Node does not have any credentials set" into a continueOnFail that
+// swallowed it. Meanwhile a working Slack credential was sitting on WF-ERR the
+// whole time. Borrowing it by type is how a new node gets wired to the
+// credential the rest of the stack already uses, without a human pasting an
+// instance-specific id into a tracked file.
+const wanted = new Set();
+for (const node of payload.nodes) {
+  for (const type of Object.keys(node.credentials || {})) {
+    if (!liveCredentialByType.has(type)) wanted.add(type);
+  }
+}
+const borrowed = [];
+if (wanted.size > 0) {
+  const all = await api('/workflows?limit=200');
+  const errorWorkflowId = live.settings && live.settings.errorWorkflow;
+
+  // Order matters. The ERROR WORKFLOW is asked first: it is where this
+  // workflow's own failures already land, so borrowing its Slack credential
+  // puts our alerts in the channel the team is already watching rather than in
+  // whichever channel an unrelated workflow happens to use. Archived and
+  // throwaway workflows are asked last — an ARCHIVE__ workflow's credential
+  // may point at a channel nobody reads.
+  const rank = (summary) => {
+    if (summary.id === errorWorkflowId) return 0;
+    if (/^(ARCHIVE__|zz_)/.test(summary.name || '')) return 2;
+    return 1;
+  };
+  const candidates = (all.data || [])
+    .filter((summary) => summary.id !== ID)
+    .sort((a, b) => rank(a) - rank(b));
+
+  for (const summary of candidates) {
+    if (wanted.size === 0) break;
+    const other = await api(`/workflows/${summary.id}`);
+    for (const node of other.nodes || []) {
+      for (const [type, ref] of Object.entries(node.credentials || {})) {
+        if (!wanted.has(type)) continue;
+        liveCredentialByType.set(type, ref);
+        borrowed.push(`${type} <- ${summary.name} / ${node.name}`);
+        wanted.delete(type);
+      }
+    }
+  }
+}
+
 const attached = [];
 const dropped = [];
 for (const node of payload.nodes) {
@@ -134,7 +183,8 @@ console.log(`  nodes: ${live.nodes.length} live -> ${payload.nodes.length} built
 if (newNodes.length) console.log(`  added:   ${newNodes.join(', ')}`);
 if (goneNodes.length) console.log(`  removed: ${goneNodes.join(', ')}`);
 console.log(`  credentials attached: ${attached.length ? attached.join(', ') : '(none)'}`);
-if (dropped.length) console.log(`  credentials DROPPED (nothing live carries the type): ${dropped.join(', ')}`);
+if (borrowed.length) console.log(`  credentials BORROWED from elsewhere on the instance: ${borrowed.join('; ')}`);
+if (dropped.length) console.log(`  credentials DROPPED (nothing on the instance carries the type): ${dropped.join(', ')}`);
 
 if (DRY) { console.log('\n--dry-run: nothing sent.'); process.exit(0); }
 

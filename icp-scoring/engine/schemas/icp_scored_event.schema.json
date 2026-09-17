@@ -1,191 +1,42 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://janeasystems.com/icp/icp_scored_event.schema.json",
-  "title": "icp.scored event (v6)",
-  "description": "One event per row, posted by the Clay ICP table to n8n Path B. It carries NO score: the table classifies and enriches, n8n scores. Everything the Score node needs to produce a grade is here, and nothing that would let the table produce one instead. `additionalProperties: false` throughout, with one deliberate allowance — a short list of provenance keys that carry no weight (`event`, `event_id`, `emitted_at`, `clay_table`, `clay_row_url`) may be present and is ignored, so the table adding a trace field does not reject a run.",
+  "title": "icp.scored event (v6.2 — the table scores)",
+  "description": "One event per row, posted by the Clay ICP table to n8n Path B. It carries THE SCORE: the table classifies, enriches AND grades, and n8n writes. Eight required keys are what a write cannot happen without; twelve optional keys are the working, carried into the run summary and never into a decision. additionalProperties is false over exactly those twenty — a column the table starts sending that this list does not name is a contract change, and a contract change should be loud.",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "request_id", "org_id", "requested_at", "domain",
-    "resolved", "cls_all", "apollo_summary", "model_version"
+    "request_id", "org_id", "deal_id", "requested_at",
+    "final", "grade", "status", "note"
   ],
   "properties": {
-    "request_id":  { "type": "string", "minLength": 1, "description": "the n8n correlation id issued on Path A; the Path B dedupe key" },
-    "org_id":      { "type": "integer", "minimum": 1, "description": "numeric, as Pipedrive has it and as Path A sends it" },
-    "deal_id":     { "type": ["integer", "null"] },
-    "requested_at": { "type": "string", "minLength": 10, "description": "when Path A asked; the table's \"today\" for days-open arithmetic, and what the Contracting guard measures evidence age against" },
+    "request_id": { "type": "string", "minLength": 1, "description": "the n8n correlation id issued on Path A; the Path B dedupe key, on its own" },
+    "org_id":     { "type": "integer", "minimum": 1, "description": "numeric, as Pipedrive has it and as Path A sent it — it becomes a URL path segment on the PATCH" },
+    "deal_id":    { "type": ["integer", "null"], "description": "present always; null is legal, because a re-score can happen outside a deal" },
+    "requested_at": { "type": "string", "minLength": 10, "description": "when Path A asked" },
 
-    "domain": { "type": "string", "minLength": 1, "description": "the ONE identifier, echoed back from the Path A request. The organization's Pipedrive Website URL normalised to a bare host: lowercase, no scheme, no www., no path. There is no name or LinkedIn fallback — an organization with no usable website is never sent to the table, so every event that arrives has one." },
+    "final":  { "type": ["integer", "null"], "minimum": 0, "maximum": 100, "description": "the grade's number. Written as \"<final> - <grade>\"." },
+    "grade":  { "oneOf": [{ "enum": ["A", "B", "C"] }, { "type": "null" }] },
+    "status": { "enum": ["scored", "insufficient_data"], "description": "\"scored\" REQUIRES a non-null final and grade; otherwise the organization would be given a grade-shaped blank" },
+    "note":   { "type": "string", "minLength": 1, "description": "the table's own note, written to the Pipedrive activity VERBATIM. n8n renders nothing: there is one author of what a rep reads, and it is the table." },
 
-    "resolved": {
-      "description": "What the table resolved the domain to. Trace only: Path B writes two organization fields and nothing else, so none of this reaches Pipedrive. Kept because a run that scored the wrong company is diagnosed from here.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["domain", "linkedin_url", "website"],
-      "properties": {
-        "domain":       { "type": ["string", "null"] },
-        "linkedin_url": { "type": ["string", "null"] },
-        "website":      { "type": ["string", "null"] }
-      }
-    },
+    "composite":                { "type": ["number", "null"] },
+    "multiplier":               { "type": ["number", "null"] },
+    "final_without_activation": { "type": ["number", "null"] },
 
-    "cls_all": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "engineering_hiring", "industry_vertical", "company_type",
-        "stage_maturity", "activation_state", "geography",
-        "revenue_range", "buying_signal"
-      ],
-      "properties": {
-        "engineering_hiring": {
-          "description": "The hiring picture behind stage_maturity and buying_signal. Every count may be null: a jobs provider that returned nothing and a company hiring nobody are opposite facts, and `dates_available: false` is how the table says it could not tell.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["total_open", "eng_open", "eng_open_60d_plus", "dates_available", "leader_titles", "eng_titles_with_days", "eng_open_ratio", "eng_headcount"],
-          "properties": {
-            "total_open":           { "type": ["integer", "null"], "minimum": 0 },
-            "eng_open":             { "type": ["integer", "null"], "minimum": 0 },
-            "eng_open_60d_plus":    { "type": ["integer", "null"], "minimum": 0 },
-            "dates_available":      { "type": ["boolean", "null"] },
-            "leader_titles":        { "type": "array", "items": { "type": "string" } },
-            "eng_titles_with_days": { "type": "array", "items": { "type": "string" } },
-            "eng_open_ratio":       { "type": ["number", "null"], "minimum": 0 },
-            "eng_headcount":        { "type": ["integer", "null"], "minimum": 0 }
-          }
-        },
+    "industry_level": { "$ref": "#/definitions/level" },
+    "stage_level":    { "$ref": "#/definitions/level" },
+    "type_level":     { "$ref": "#/definitions/level" },
+    "geo_level":      { "$ref": "#/definitions/level" },
+    "revenue_level":  { "$ref": "#/definitions/level" },
 
-        "industry_vertical": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["value", "evidence", "confidence", "missing_inputs"],
-          "properties": {
-            "value":          { "type": ["string", "null"] },
-            "evidence":       { "$ref": "#/definitions/evidence" },
-            "confidence":     { "$ref": "#/definitions/confidence" },
-            "missing_inputs": { "$ref": "#/definitions/missing" }
-          }
-        },
-
-        "company_type":   { "$ref": "#/definitions/levelled" },
-        "stage_maturity": { "$ref": "#/definitions/levelled" },
-
-        "activation_state": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["value", "evidence", "confidence", "missing_inputs"],
-          "properties": {
-            "value": { "oneOf": [{ "enum": ["Accelerating", "Transitioning", "Stable", "Contracting"] }, { "type": "null" }] },
-            "evidence": { "$ref": "#/definitions/evidence" },
-            "activation_evidence_dated": {
-              "description": "A CITATION, not a boolean: the evidence item the state rests on, e.g. \"apollo.funding_events[0].date: 2025-09-01\". The Contracting guard reads a date out of it and asks whether it names a layoff or hiring freeze.",
-              "type": ["string", "null"]
-            },
-            "confidence":     { "$ref": "#/definitions/confidence" },
-            "missing_inputs": { "$ref": "#/definitions/missing" }
-          }
-        },
-
-        "geography": {
-          "description": "Confidence and missing_inputs are optional here — §3 of the task shows geography without missing_inputs. Accepting either shape costs nothing; rejecting a run because a sibling key travelled would cost a score.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["level", "evidence"],
-          "properties": {
-            "level":          { "$ref": "#/definitions/level" },
-            "evidence":       { "$ref": "#/definitions/evidence" },
-            "confidence":     { "$ref": "#/definitions/confidence" },
-            "missing_inputs": { "$ref": "#/definitions/missing" }
-          }
-        },
-
-        "revenue_range": {
-          "description": "The only component that names where its number came from. The note prints `revenue_source` so a rep can see that a band came from a headcount heuristic rather than a filing.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["level", "revenue_band_used", "revenue_source", "evidence", "confidence", "missing_inputs"],
-          "properties": {
-            "level":             { "$ref": "#/definitions/level" },
-            "revenue_band_used": { "type": ["string", "null"] },
-            "revenue_source":    { "type": ["string", "null"] },
-            "evidence":          { "$ref": "#/definitions/evidence" },
-            "confidence":        { "$ref": "#/definitions/confidence" },
-            "missing_inputs":    { "$ref": "#/definitions/missing" }
-          }
-        },
-
-        "buying_signal": {
-          "description": "Weight 0 in the rubric — carried for the note and the audit row, never for the composite. Confidence and missing_inputs optional, as §3 shows it with neither.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["level", "evidence"],
-          "properties": {
-            "level":          { "$ref": "#/definitions/level" },
-            "evidence":       { "$ref": "#/definitions/evidence" },
-            "confidence":     { "$ref": "#/definitions/confidence" },
-            "missing_inputs": { "$ref": "#/definitions/missing" }
-          }
-        },
-
-        "conflict_note": {
-          "description": "Free text when two sources disagreed. Reaches the note and the audit row; never the score.",
-          "type": ["string", "null"]
-        }
-      }
-    },
-
-    "apollo_summary": {
-      "description": "The firmographic reading behind the levels. headcount_6mo_growth is load-bearing: it is the first test the Contracting guard applies.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "employees", "eng_headcount", "country", "state", "founded_year",
-        "last_round_date", "headcount_6mo_growth", "headcount_12mo_growth",
-        "publicly_traded_symbol", "owned_by_organization_id"
-      ],
-      "properties": {
-        "employees":              { "type": ["integer", "null"], "minimum": 0 },
-        "eng_headcount":          { "type": ["integer", "null"], "minimum": 0 },
-        "country":                { "type": ["string", "null"] },
-        "state":                  { "type": ["string", "null"] },
-        "founded_year":           { "type": ["integer", "null"] },
-        "last_round_date":        { "type": ["string", "null"] },
-        "headcount_6mo_growth":   { "type": ["number", "null"] },
-        "headcount_12mo_growth":  { "type": ["number", "null"] },
-        "publicly_traded_symbol": { "type": ["string", "null"] },
-        "owned_by_organization_id": { "type": ["string", "integer", "null"] }
-      }
-    },
-
-    "model_version": { "const": "v6" },
-
-    "event":        { "description": "ignored", "type": ["string", "null"] },
-    "event_id":     { "description": "ignored for routing; sharpens the dedupe key when present", "type": ["string", "null"] },
-    "emitted_at":   { "description": "ignored; n8n stamps its own rows", "type": ["string", "null"] },
-    "clay_table":   { "type": ["string", "null"] },
-    "clay_row_url": { "type": ["string", "null"] }
+    "activation_used":    { "oneOf": [{ "enum": ["Accelerating", "Transitioning", "Stable", "Contracting"] }, { "type": "null" }] },
+    "confidence_overall": { "oneOf": [{ "enum": ["high", "medium", "low"] }, { "type": "null" }] },
+    "tier2_candidate":    { "type": ["boolean", "null"] },
+    "flags":              { "type": ["array", "null"], "items": { "type": "string" } }
   },
 
   "definitions": {
-    "level": { "oneOf": [{ "enum": [0, 3, 7, 10] }, { "type": "null" }] },
-    "confidence": { "enum": ["high", "medium", "low"] },
-    "missing": { "type": "array", "items": { "type": "string" } },
-    "evidence": {
-      "description": "Bounded only to stop an unbounded payload. The note and the audit row both trim, so rejecting a whole scoring event over a seventh evidence string would be the wrong trade.",
-      "type": "array",
-      "items": { "type": "string" },
-      "maxItems": 20
-    },
-    "levelled": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["level", "evidence", "confidence", "missing_inputs"],
-      "properties": {
-        "level":          { "$ref": "#/definitions/level" },
-        "evidence":       { "$ref": "#/definitions/evidence" },
-        "confidence":     { "$ref": "#/definitions/confidence" },
-        "missing_inputs": { "$ref": "#/definitions/missing" }
-      }
-    }
+    "level": { "oneOf": [{ "enum": [0, 3, 7, 10] }, { "type": "null" }] }
   }
 }

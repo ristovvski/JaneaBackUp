@@ -509,13 +509,20 @@ describe('Code nodes are the tested sources', () => {
     assert.deepEqual(after, before, 'run `npm run gen:nodes` and rebuild the workflow');
   });
 
-  test('no Code node reads a raw webhook body except the two translation layers', () => {
+  test('no Code node reads a raw webhook body except Dedupe and the error path', () => {
+    // Dedupe is the translation layer. BuildErrorContext is the exception that
+    // had to be made: n8n's task runner does not carry a thrown error's own
+    // properties across an error output, so the ids it needs are gone by the
+    // time it runs and the only intact copy of the request is the webhook item
+    // itself. Execution 60629 posted its failure activity with org_id null
+    // because of that, and the activity landed on no organization at all.
+    const ALLOWED = ['Dedupe', 'Dedupe B', 'BuildErrorContext'];
     for (const node of wf.nodes.filter((n) => n.type === 'n8n-nodes-base.code')) {
       const readsWebhook = /\$\('Webhook /.test(node.parameters.jsCode);
-      const allowed = node.name.startsWith('Dedupe');
+      const allowed = ALLOWED.includes(node.name);
       assert.equal(
         readsWebhook, allowed,
-        `${node.name}: only Dedupe reads the webhook node directly`
+        `${node.name}: only ${ALLOWED.join(', ')} may read a webhook node directly`
       );
     }
   });

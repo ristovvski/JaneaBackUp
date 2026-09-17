@@ -69,8 +69,15 @@ const RULES = [
     //     `clay workflows actions list` prints, and it authenticates nothing.
     //     Allowed only on a line that names it as such, so a real credential
     //     cannot hide behind the word.
+    //   - an n8n correlation id carried as a `request_id` is written
+    //     `req-<uuid>`: it is the value Path A minted to tie one scoring run
+    //     together, it authenticates nothing, and the live Clay capture in
+    //     tests/fixtures/clay/ is only worth keeping if it is kept VERBATIM.
+    //     The `req-` prefix is what makes it distinguishable from a bare
+    //     credential, so the allowance requires it.
     allow: (line) => /correlation_id|_fixture|\bnil\b|00000000-0000/.test(line)
       || /\/tmp\/|scratchpad|claude-\d/.test(line)
+      || /req-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/.test(line)
       || /actionPackageId|packageId|^\s*(cpj|clay|apollo|predictleads|pdl):\s*'/.test(line),
   },
   {

@@ -1,0 +1,24 @@
+{
+  "request_id": "req-icp-0008",
+  "org_id": 10001,
+  "deal_id": 55001,
+  "requested_at": "2026-09-18T10:42:00Z",
+  "domain": "akuvo.com",
+  "resolved": {
+    "domain": "akuvo.com",
+    "linkedin_url": null,
+    "website": "https://akuvo.com"
+  },
+  "cls_all": {
+    "industry_vertical": {
+      "value": "FinTech",
+      "evidence": [],
+      "confidence": "high",
+      "missing_inputs": []
+    }
+  },
+  "apollo_summary": {
+    "employees": 260
+  },
+  "model_version": "v6"
+}

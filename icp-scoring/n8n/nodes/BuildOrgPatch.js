@@ -59,35 +59,36 @@ if (cfg === null || cfg === undefined) {
 if (cfg === null || cfg === undefined) {
   throw new Error('ICP_NO_CONFIG: neither CONFIG nor CONFIG B is upstream of this node');
 }
-// Score's output is ParseScored's, plus the grade — so one lookup gets both
-// the classifier evidence and the number it produced.
-const parsed = $('Score').item.json;
+// ParseScored's output: the table's grade, validated and flattened. There is
+// no Score node any more — the table scores and this workflow writes.
+const parsed = $('ParseScored').item.json;
 const fetched = $input.first().json;
 const org = fetched.data || fetched;
 const existing = org.custom_fields || {};
 
-const score = parsed.score;
-
 // ---------------------------------------------------------------------------
 // The one value.
 //
-// "<final> - <grade>", e.g. "56 - B". On insufficient_data the score is not a
+// "<final> - <grade>", e.g. "62 - B". On insufficient_data the score is not a
 // number and saying "0 - C" would be a lie with the same shape as a real
 // answer, so the whole string is replaced — and it keeps the separator so a
 // column of these still sorts and filters as one thing.
 // ---------------------------------------------------------------------------
 let autoScore;
-if (score.status === 'insufficient_data') {
+if (parsed.status === 'insufficient_data') {
   autoScore = cfg.label_insufficient;
-} else if (score.grade === null || score.grade === undefined || score.final_score === null) {
+} else if (parsed.grade === null || parsed.grade === undefined || parsed.final === null) {
+  // ParseScored already refuses status "scored" with a null grade, so this is
+  // the belt to that braces: it cannot be reached without the boundary having
+  // been changed, and if it ever is, nothing grade-shaped gets written.
   const error = new Error(
-    `ICP_UNSCORED: status is ${JSON.stringify(score.status)} but there is no grade to write ` +
-    `(grade ${JSON.stringify(score.grade)}, final ${JSON.stringify(score.final_score)})`
+    `ICP_UNSCORED: status is ${JSON.stringify(parsed.status)} but there is no grade to write ` +
+    `(grade ${JSON.stringify(parsed.grade)}, final ${JSON.stringify(parsed.final)})`
   );
   error.name = 'IcpUnscored';
   throw error;
 } else {
-  autoScore = `${score.final_score}${cfg.auto_score_separator}${score.grade}`;
+  autoScore = `${parsed.final}${cfg.auto_score_separator}${parsed.grade}`;
 }
 
 const scoredAt = String(cfg.now_iso).slice(0, 10); // Pipedrive date = YYYY-MM-DD

@@ -49,6 +49,12 @@ export const ENV_BINDINGS = {
   slack_channel_ops: 'ICP_SLACK_CHANNEL',
 };
 
+// The Slack credential to attach, resolved at deploy time against the live
+// instance. A credential ID is instance-specific, so it cannot be a literal
+// here; scripts/n8n_deploy.mjs resolves it by TYPE against whatever the
+// workflow already carries, and this placeholder is what it replaces.
+export const SLACK_CREDENTIAL_PLACEHOLDER = 'slack_ops';
+
 /**
  * The CONFIG Set node's jsonOutput: the static payload, plus the four
  * instance-specific values, plus now_iso.
@@ -426,11 +432,10 @@ export function buildWorkflow() {
 
   nodes.push(codeNode('Dedupe B', [340, 700], code('Dedupe')));
 
-  // Score sits between ParseScored and the write gate. It is a separate node
-  // on purpose: ParseScored decides whether the event is admissible, Score
-  // decides what it is worth, and a run trace that shows the two separately is
-  // how you tell "the table sent nonsense" from "the rubric graded it low".
-  nodes.push(codeNode('Score', [640, 620], code('Score')));
+  // There is no Score node. The table scores; ParseScored checks that what
+  // arrived can be written and hands it on flat. v6.0 held the rubric here and
+  // recomputed the grade — two implementations of one rubric, which is exactly
+  // the drift this project spent a release removing from Clay.
 
   nodes.push(codeNode('ParseScored', [540, 700], code('ParseScored'), {
     onError: 'continueErrorOutput',
@@ -499,20 +504,31 @@ export function buildWorkflow() {
   // activity, no field write. v5 also set ICP Calculated to "Error" here; v6
   // does not touch the organization at all when it could not score it, because
   // a field that says "Error" is a field a rep has to learn to ignore.
+  // Every field comes from BuildErrorContext BY NAME, never from $json: this
+  // node's input is the Slack API response, so $json.org_id was `undefined`
+  // and the failure activity landed on no organization at all (activity 46842,
+  // execution 60629). A Number(undefined) is NaN, which Pipedrive accepts as
+  // "no organization" rather than rejecting.
+  const errRef = "$('BuildErrorContext').item.json";
   nodes.push(httpNode('POST activity error', [1740, 820], {
     method: 'POST',
     url: `=${PIPEDRIVE_V1}/activities`,
     sendBody: true,
     specifyBody: 'json',
     jsonBody:
-      '={{ JSON.stringify({ org_id: Number($json.org_id), ' +
-      `subject: ${cfgRef('B')}.item.json.activity_subject, ` +
+      '={{ JSON.stringify({ ' +
+      `org_id: Number(${errRef}.org_id), ` +
+      `subject: ${cfgRef('B')}.item.json.activity_subject_failed, ` +
       `type: ${cfgRef('B')}.item.json.activity_type, done: true, note: ` +
       "'Not scored — the run failed before a grade could be produced.' + '\\n\\n' + " +
-      "'Reason: ' + $json.error_message + '\\n\\n' + " +
-      "'CHECK: this is a system fault, not a judgement about the company — the audit row has the detail.'" +
+      `'Reason: ' + ${errRef}.error_message + '\\n\\n' + ` +
+      `(${errRef}.problem_count > 0 ? 'What was wrong with the data: ' + ${errRef}.problems.join('; ') + '\\n\\n' : '') + ` +
+      "'CHECK: this is a system fault, not a judgement about the company — the run trace has the detail.'" +
       ' }) }}',
   }, NO_RETRY));
+
+  // Wired LAST on the error branch so everything else has already run.
+  nodes.push(codeNode('FailLoudly', [1940, 820], code('FailLoudly')));
 
 
 
@@ -562,10 +578,9 @@ export function buildWorkflow() {
     'CONFIG B': main('Dedupe B'),
     'Dedupe B': main('ParseScored'),
     // ParseScored's second output is its error branch (onError:
-    // continueErrorOutput), so a malformed event skips Score entirely and goes
-    // straight to marking the org Errored.
-    ParseScored: { main: [out('Score'), out('BuildErrorContext')] },
-    Score: main('IF write allowed?'),
+    // continueErrorOutput): a malformed event goes straight to the failure
+    // branch, which alerts, records, and then THROWS so the execution ends red.
+    ParseScored: { main: [out('IF write allowed?'), out('BuildErrorContext')] },
     // A duplicate skips the writes and goes straight to the audit row.
     'IF write allowed?': branch(['GET organization B'], ['BuildRunSummary']),
     'GET organization B': main('BuildOrgPatch'),
@@ -585,6 +600,10 @@ export function buildWorkflow() {
     // organization is not touched at all.
     BuildErrorContext: main('Slack alert error'),
     'Slack alert error': main('POST activity error'),
+    // Last, and it throws. The alert and the activity have already happened;
+    // the throw is what turns a quietly-successful execution red so
+    // settings.errorWorkflow (WF-ERR) fires and the failure reaches Slack.
+    'POST activity error': main('FailLoudly'),
   };
 
   const workflow = {

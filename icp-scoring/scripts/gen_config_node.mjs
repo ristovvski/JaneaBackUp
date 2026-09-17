@@ -160,6 +160,9 @@ export function buildConfig() {
     // The skip has its own subject so a rep scanning the timeline can tell a
     // grade from a request for one missing field without opening either.
     activity_subject_skipped: 'ICP not scored',
+    // A failed run is not a scored one, and an activity titled "ICP scored"
+    // with a failure body is how a rep learns to stop reading these.
+    activity_subject_failed: 'ICP scoring failed',
     activity_no_website:
       'Skipped: organization has no Website URL — fill it and re-create the deal or re-run',
 
