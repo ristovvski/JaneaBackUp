@@ -3,7 +3,7 @@
   "status": "placeholder",
   "generated_at": null,
   "account": null,
-  "model_version": "v5",
+  "model_version": "v6",
   "fields": {
     "icp_calculated": {
       "name": "ICP Calculated",
@@ -12,11 +12,26 @@
       "key": "PLACEHOLDER_icp_calculated_0000000000000000000000",
       "id": null,
       "options": {
-        "ICP A": { "id": null, "label": "ICP A" },
-        "ICP B": { "id": null, "label": "ICP B" },
-        "ICP C": { "id": null, "label": "ICP C" },
-        "Insufficient data": { "id": null, "label": "Insufficient data" },
-        "Error": { "id": null, "label": "Error" }
+        "ICP A": {
+          "id": null,
+          "label": "ICP A"
+        },
+        "ICP B": {
+          "id": null,
+          "label": "ICP B"
+        },
+        "ICP C": {
+          "id": null,
+          "label": "ICP C"
+        },
+        "Insufficient data": {
+          "id": null,
+          "label": "Insufficient data"
+        },
+        "Error": {
+          "id": null,
+          "label": "Error"
+        }
       }
     },
     "icp_score": {
@@ -49,13 +64,45 @@
       "key": "PLACEHOLDER_icp_final_000000000000000000000000000",
       "id": null,
       "options": {
-        "ICP A": { "id": null, "label": "ICP A" },
-        "ICP B": { "id": null, "label": "ICP B" },
-        "ICP C": { "id": null, "label": "ICP C" },
-        "Not ICP": { "id": null, "label": "Not ICP" }
+        "ICP A": {
+          "id": null,
+          "label": "ICP A"
+        },
+        "ICP B": {
+          "id": null,
+          "label": "ICP B"
+        },
+        "ICP C": {
+          "id": null,
+          "label": "ICP C"
+        },
+        "Not ICP": {
+          "id": null,
+          "label": "Not ICP"
+        }
       }
+    },
+    "auto_icp_score": {
+      "name": "Auto-ICP Score",
+      "field_type": "varchar",
+      "purpose": "The ONLY organization field this workflow writes. Text, formatted \"<final> - <grade>\", e.g. \"56 - B\"; \"n/a - insufficient data\" when the score could not be produced. Text rather than a number and an enum because it is one human-readable fact, and two fields that can disagree about the same run is a worse shape than one that cannot.",
+      "key": "PLACEHOLDER_auto_icp_score_0000000000000000000000000000000000",
+      "id": null
+    },
+    "sales_rep_icp_score": {
+      "name": "Sales Rep ICP Score",
+      "field_type": "varchar",
+      "purpose": "The human's field. Created by this repo so it exists next to the automatic one, and NEVER written to — asserted in BuildOrgPatch and in the static suite, not merely omitted.",
+      "key": "PLACEHOLDER_sales_rep_icp_score_00000000000000000000000000000",
+      "id": null
     }
   },
-  "expected_field_count": 5,
-  "written_by_workflow": ["icp_calculated", "icp_score", "icp_scored_at", "icp_model_version"]
+  "expected_field_count": 7,
+  "written_by_workflow": [
+    "auto_icp_score"
+  ],
+  "fields_never_write": [
+    "sales_rep_icp_score",
+    "icp_final"
+  ]
 }

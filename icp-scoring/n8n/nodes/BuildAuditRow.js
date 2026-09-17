@@ -38,10 +38,10 @@ const parsed = $('Score').item.json;
 // read them defensively rather than assuming the happy path.
 let patch = null;
 try { patch = $('BuildOrgPatch').item.json; } catch (e) { patch = null; }
-let note = null;
-try { note = $('BuildNote').item.json; } catch (e) { note = null; }
-let noteResponse = null;
-try { noteResponse = $('POST note').item.json; } catch (e) { noteResponse = null; }
+let activity = null;
+try { activity = $('BuildActivity').item.json; } catch (e) { activity = null; }
+let activityResponse = null;
+try { activityResponse = $('POST activity').item.json; } catch (e) { activityResponse = null; }
 
 const score = parsed.score;
 const components = parsed.components;
@@ -56,7 +56,7 @@ const COLUMNS = [
   'activation_state', 'contracting_guard_applied', 'multiplier', 'composite', 'final',
   'final_without_activation', 'grade', 'status', 'confidence_overall',
   'tier2_candidate', 'flags', 'missing_inputs', 'evidence_json',
-  'patch_written', 'note_id', 'error',
+  'patch_written', 'auto_icp_score', 'activity_id', 'error',
 ];
 
 // Collapse every component's gaps into one auditable string.
@@ -137,9 +137,10 @@ const row = {
   evidence_json: JSON.stringify(evidence),
 
   patch_written: patch === null ? false : patch.patch_is_empty === false,
-  note_id: noteResponse && (noteResponse.id || (noteResponse.data && noteResponse.data.id))
-    ? String(noteResponse.id || noteResponse.data.id)
+  activity_id: activityResponse && (activityResponse.id || (activityResponse.data && activityResponse.data.id))
+    ? String(activityResponse.id || activityResponse.data.id)
     : '',
+  auto_icp_score: patch === null ? '' : String(patch.auto_icp_score || ''),
   error: errorBits.join(' · '),
 };
 

@@ -361,8 +361,8 @@ describe('retry semantics', () => {
   });
 
   test('the note POST specifically must never retry', () => {
-    assert.equal(byName.get('POST note').retryOnFail, false);
-    assert.equal(byName.get('POST note').parameters.method, 'POST');
+    assert.equal(byName.get('POST activity').retryOnFail, false);
+    assert.equal(byName.get('POST activity').parameters.method, 'POST');
   });
 
   test('every GET and PATCH has retry configured with a wait', () => {
@@ -443,12 +443,24 @@ describe('continueOnFail is allow-listed', () => {
     assert.deepEqual(CONTINUE_ON_FAIL_ALLOWLIST, ['Slack alert error']);
   });
 
-  test('and it really is posted before the writes on its branch', () => {
-    assert.deepEqual(wf.connections.BuildErrorPatch.main[0].map((t) => t.node), ['Slack alert error']);
+  test('and it really is posted before the activity on its branch', () => {
+    assert.deepEqual(wf.connections.BuildErrorContext.main[0].map((t) => t.node), ['Slack alert error']);
     assert.deepEqual(
       wf.connections['Slack alert error'].main[0].map((t) => t.node),
-      ['IF error patch non-empty?']
+      ['POST activity error']
     );
+  });
+
+  test('the error branch touches the organization not at all', () => {
+    // v5 marked the org "Error" here. A field that says Error is a field a rep
+    // learns to ignore, and it is indistinguishable from a judgement about the
+    // company — so a failed run now leaves the same footprint a successful one
+    // does: one activity, no field write.
+    const branch = ['BuildErrorContext', 'Slack alert error', 'POST activity error'];
+    for (const name of branch) assert.ok(byName.get(name), `${name} must exist`);
+    const patchers = wf.nodes.filter((n) => n.parameters && n.parameters.method === 'PATCH');
+    assert.deepEqual(patchers.map((n) => n.name), ['PATCH organization'],
+      'exactly one PATCH node in the whole workflow, and it is on the happy path');
   });
 });
 
@@ -597,7 +609,7 @@ describe('the graph', () => {
     // add the name here rather than retyping the block.
     const WITH_FALLBACK = [
       'Dedupe', 'Dedupe B', 'ParseScored', 'BuildOrgPatch',
-      'BuildNote', 'BuildAuditRow', 'BuildErrorPatch',
+      'BuildActivity', 'BuildAuditRow', 'BuildErrorContext',
     ];
     const extract = (src) => {
       const from = src.indexOf('let cfg = null;');
@@ -624,12 +636,12 @@ describe('the graph', () => {
     assert.equal(wf.connections['Slack warn rate'], undefined, 'the tee must dead-end');
   });
 
-  test('both Code nodes that can throw route their error output to BuildErrorPatch', () => {
+  test('both Code nodes that can throw route their error output to BuildErrorContext', () => {
     for (const name of ['ParseScored', 'BuildClayRequest']) {
       const node = byName.get(name);
       assert.equal(node.onError, 'continueErrorOutput', `${name} needs an error output`);
       const errorOutput = wf.connections[name].main[1];
-      assert.deepEqual(errorOutput.map((t) => t.node), ['BuildErrorPatch'], name);
+      assert.deepEqual(errorOutput.map((t) => t.node), ['BuildErrorContext'], name);
     }
   });
 
@@ -693,12 +705,15 @@ describe('ICP Final is never written', () => {
 
   test('CONFIG declares it unwritable, and the patch builders check that list', () => {
     const config = buildConfig();
-    assert.deepEqual(config.fields_never_write, [config.f_icp_final]);
-    for (const name of ['BuildOrgPatch', 'BuildErrorPatch']) {
-      const source = readFileSync(join(NODES_DIR, `${name}.js`), 'utf8');
-      assert.ok(source.includes('fields_never_write'), `${name} must check the never-write list`);
-      assert.ok(source.includes('ICP_FORBIDDEN_WRITE'), `${name} must fail loudly, not silently omit`);
-    }
+    assert.deepEqual(config.fields_never_write, [config.f_sales_rep_icp_score, config.f_icp_final]);
+    // Only one node builds a patch now, and it is the one that must check.
+    // BuildErrorContext builds no patch at all, which is a stronger guarantee
+    // than checking a list.
+    const source = readFileSync(join(NODES_DIR, 'BuildOrgPatch.js'), 'utf8');
+    assert.ok(source.includes('fields_never_write'), 'BuildOrgPatch must check the never-write list');
+    assert.ok(source.includes('ICP_FORBIDDEN_WRITE'), 'and fail loudly, not silently omit');
+    const errorSource = readFileSync(join(NODES_DIR, 'BuildErrorContext.js'), 'utf8');
+    assert.ok(!errorSource.includes('custom_fields'), 'BuildErrorContext must not build a patch at all');
   });
 
   test('the NOTE_WATCHDOG marker for NEEDS_DECISION #2 is where the runbook says', () => {
@@ -716,12 +731,115 @@ describe('ICP Final is never written', () => {
       const params = nodeParams(node);
       if (/^CONFIG/.test(node.name)) continue;
       const reads = params.match(/f_icp_final/g) || [];
-      // BuildOrgPatch/BuildErrorPatch touch it only via fields_never_write.
+      // BuildOrgPatch/BuildErrorContext touch it only via fields_never_write.
       for (const _ of reads) {
         assert.ok(
           params.includes('fields_never_write'),
           `${node.name} references f_icp_final outside the never-write guard`
         );
+      }
+    }
+  });
+});
+
+describe('one Path B run = one field write + one activity (the v6 contract)', () => {
+  // The four statements the contract makes, as four tests. Each is a thing
+  // someone could break by adding a node, and none of them is checkable by
+  // reading a single file — they are properties of the whole graph.
+
+  const pathBNodes = () => {
+    const seen = new Set();
+    const queue = ['Webhook Clay'];
+    while (queue.length > 0) {
+      const name = queue.shift();
+      if (seen.has(name)) continue;
+      seen.add(name);
+      for (const output of (wf.connections[name] || { main: [] }).main) {
+        for (const target of output || []) queue.push(target.node);
+      }
+    }
+    return [...seen].map((n) => byName.get(n)).filter(Boolean);
+  };
+
+  test('exactly one node writes to an organization, and it is a PATCH of custom_fields', () => {
+    const writers = wf.nodes.filter((n) => {
+      const p = n.parameters || {};
+      return typeof p.url === 'string' && /organizations/.test(p.url) && p.method && p.method !== 'GET';
+    });
+    assert.deepEqual(writers.map((n) => n.name), ['PATCH organization']);
+    assert.equal(writers[0].parameters.method, 'PATCH');
+    assert.match(writers[0].parameters.jsonBody, /\$json\.patch/,
+      'it writes the patch BuildOrgPatch built, and nothing it composes itself');
+  });
+
+  test('the only field that patch can contain is Auto-ICP Score', () => {
+    // Asserted at the source, because the node builds the body and the HTTP
+    // node just forwards it.
+    const source = readFileSync(join(NODES_DIR, 'BuildOrgPatch.js'), 'utf8');
+    assert.match(source, /ICP_UNEXPECTED_WRITE/, 'the node must refuse a second key');
+    assert.match(source, /keys\.length > 1/, 'and refuse it by counting, not by naming');
+    const config = buildConfig();
+    assert.ok(config.f_auto_icp_score, 'CONFIG must carry the one writable key');
+  });
+
+  test('Sales Rep ICP Score is in the never-write list and referenced nowhere else', () => {
+    const config = buildConfig();
+    assert.ok(config.fields_never_write.includes(config.f_sales_rep_icp_score));
+    for (const node of wf.nodes) {
+      if (/^CONFIG/.test(node.name)) continue;
+      const params = nodeParams(node);
+      if (!params.includes('f_sales_rep_icp_score')) continue;
+      assert.ok(
+        params.includes('fields_never_write'),
+        `${node.name} names the human's field outside the never-write guard`
+      );
+    }
+  });
+
+  test('exactly one activity per run on each branch, and none anywhere else', () => {
+    const activityNodes = wf.nodes.filter((n) => {
+      const p = n.parameters || {};
+      return typeof p.url === 'string' && /\/activities/.test(p.url);
+    });
+    assert.deepEqual(activityNodes.map((n) => n.name).sort(), ['POST activity', 'POST activity error']);
+    for (const node of activityNodes) {
+      assert.match(node.parameters.jsonBody, /done: true/, `${node.name} must not leave an open task`);
+      assert.equal(node.retryOnFail, false, `${node.name} must not retry — a retry is a second activity`);
+    }
+
+    // And the two are on different branches, so a run reaches exactly one.
+    const happy = pathBNodes().map((n) => n.name);
+    assert.ok(happy.includes('POST activity'));
+    assert.ok(happy.includes('POST activity error'));
+    assert.deepEqual(
+      wf.connections['IF write allowed?'].main[0].map((t) => t.node), ['GET organization B'],
+      'the happy branch leads to the write'
+    );
+  });
+
+  test('no note, no label, no owner, no other organization mutation anywhere', () => {
+    for (const node of wf.nodes) {
+      const p = node.parameters || {};
+      if (typeof p.url !== 'string') continue;
+      const method = p.method || 'GET';
+      if (method === 'GET') continue;
+      // Everything that writes must be one of these four, by name.
+      assert.ok(
+        ['PATCH organization', 'POST activity', 'POST activity error', 'POST Clay'].includes(node.name),
+        `${node.name} writes ${method} ${p.url} — not in the v6 contract`
+      );
+    }
+    assert.equal(JSON.stringify(wf).includes('/notes'), false, 'the notes endpoint is gone');
+    assert.equal(JSON.stringify(wf).includes('label_ids'), false, 'nothing touches labels');
+  });
+
+  test('no v5 ICP field appears in any node parameter', () => {
+    const config = buildConfig();
+    for (const node of wf.nodes) {
+      if (/^CONFIG/.test(node.name)) continue;
+      const params = nodeParams(node);
+      for (const retired of config.f_retired_v5) {
+        assert.ok(!params.includes(retired), `${node.name} still references a retired v5 field`);
       }
     }
   });

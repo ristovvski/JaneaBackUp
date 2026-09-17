@@ -414,15 +414,17 @@ export function buildWorkflow() {
     jsonBody: '={{ JSON.stringify($json.patch) }}',
   }, RETRY));
 
-  nodes.push(codeNode('BuildNote', [1740, 500], code('BuildNote')));
+  nodes.push(codeNode('BuildActivity', [1740, 500], code('BuildActivity')));
 
-  nodes.push(httpNode('POST note', [1940, 500], {
+  // ONE activity per scoring run, marked done so it lands as a record rather
+  // than as a task in someone's queue. Activities are v1: the v2 endpoint does
+  // not accept `note`, which is where the body goes.
+  nodes.push(httpNode('POST activity', [1940, 500], {
     method: 'POST',
-    // Notes are v1: there is no v2 notes endpoint.
-    url: `=${PIPEDRIVE_V1}/notes`,
+    url: `=${PIPEDRIVE_V1}/activities`,
     sendBody: true,
     specifyBody: 'json',
-    jsonBody: '={{ JSON.stringify({ org_id: Number($json.org_id), content: $json.note }) }}',
+    jsonBody: '={{ JSON.stringify({ org_id: Number($json.org_id), subject: $json.subject, type: $json.type, done: true, note: $json.body }) }}',
   }, NO_RETRY));
 
   nodes.push(codeNode('BuildAuditRow', [2140, 600], code('BuildAuditRow')));
@@ -453,7 +455,13 @@ export function buildWorkflow() {
   });
 
   // ===== Error branch =====================================================
-  nodes.push(codeNode('BuildErrorPatch', [940, 900], code('BuildErrorPatch')));
+  //
+  // v5 had BuildErrorPatch -> IF patch non-empty? -> PATCH organization error,
+  // which set ICP Calculated to "Error" on the organization. All three are
+  // gone: a failed run must leave the organization untouched, so the branch is
+  // now the Slack alert and one activity, which is the same footprint the
+  // happy path leaves.
+  nodes.push(codeNode('BuildErrorContext', [940, 900], code('BuildErrorContext')));
 
   // Alert BEFORE the writes, with continue-on-fail: if marking the org as
   // Errored also fails, the human ping must still have gone out. This is the
@@ -469,31 +477,27 @@ export function buildWorkflow() {
     { continueOnFail: true, ...NO_RETRY }
   ));
 
-  nodes.push(ifNode('IF error patch non-empty?', [1340, 900], [boolCondition('$json.patch_is_empty', false)]));
-
-  nodes.push(httpNode('PATCH organization error', [1540, 820], {
-    method: 'PATCH',
-    url: `=${PIPEDRIVE_V2}/organizations/{{ $json.org_id }}`,
-    sendBody: true,
-    specifyBody: 'json',
-    jsonBody: '={{ JSON.stringify($json.patch) }}',
-  }, RETRY));
-
-  nodes.push(httpNode('POST note error', [1740, 820], {
+  // The error branch posts the SAME one activity the happy path does, so a
+  // failed run leaves exactly the same footprint as a successful one: one
+  // activity, no field write. v5 also set ICP Calculated to "Error" here; v6
+  // does not touch the organization at all when it could not score it, because
+  // a field that says "Error" is a field a rep has to learn to ignore.
+  nodes.push(httpNode('POST activity error', [1740, 820], {
     method: 'POST',
-    url: `=${PIPEDRIVE_V1}/notes`,
+    url: `=${PIPEDRIVE_V1}/activities`,
     sendBody: true,
     specifyBody: 'json',
     jsonBody:
-      '={{ JSON.stringify({ org_id: Number($json.org_id), content: ' +
-      `'ICP ' + ${cfgRef('B')}.item.json.model_version + ' — Calculated: ' + ` +
-      `${cfgRef('B')}.item.json.label_error + '\\n' + ` +
-      "'Reason: ' + $json.error_name + ': ' + $json.error_message + '\\n' + " +
-      "'request_id ' + ($json.request_id || 'n/a') + ' · execution_id ' + $execution.id" +
+      '={{ JSON.stringify({ org_id: Number($json.org_id), ' +
+      `subject: ${cfgRef('B')}.item.json.activity_subject, ` +
+      `type: ${cfgRef('B')}.item.json.activity_type, done: true, note: ` +
+      "'Not scored — the run failed before a grade could be produced.' + '\\n\\n' + " +
+      "'Reason: ' + $json.error_message + '\\n\\n' + " +
+      "'CHECK: this is a system fault, not a judgement about the company — the audit row has the detail.'" +
       ' }) }}',
   }, NO_RETRY));
 
-  nodes.push(noOp('Skip error patch', [1540, 980]));
+
 
   // ---------------------------------------------------------------------
   // Connections
@@ -524,7 +528,7 @@ export function buildWorkflow() {
     'IF fresh score?': branch(['Skip fresh score'], ['BuildClayRequest']),
     // Output 0 is success, output 1 is the error output (onError:
     // continueErrorOutput).
-    BuildClayRequest: { main: [out('POST Clay'), out('BuildErrorPatch')] },
+    BuildClayRequest: { main: [out('POST Clay'), out('BuildErrorContext')] },
 
     // Path B
     'Webhook Clay': main('Respond 200 B'),
@@ -534,7 +538,7 @@ export function buildWorkflow() {
     // ParseScored's second output is its error branch (onError:
     // continueErrorOutput), so a malformed event skips Score entirely and goes
     // straight to marking the org Errored.
-    ParseScored: { main: [out('Score'), out('BuildErrorPatch')] },
+    ParseScored: { main: [out('Score'), out('BuildErrorContext')] },
     Score: main('IF write allowed?'),
     // A duplicate skips the writes and goes straight to the audit row.
     'IF write allowed?': branch(['GET organization B'], ['BuildAuditRow']),
@@ -543,16 +547,16 @@ export function buildWorkflow() {
     // An empty patch means nothing changed, so no PATCH and no second note —
     // but still an audit row.
     'IF patch non-empty?': branch(['PATCH organization'], ['BuildAuditRow']),
-    'PATCH organization': main('BuildNote'),
-    BuildNote: main('POST note'),
-    'POST note': main('BuildAuditRow'),
+    'PATCH organization': main('BuildActivity'),
+    BuildActivity: main('POST activity'),
+    'POST activity': main('BuildAuditRow'),
     BuildAuditRow: main('Append audit row'),
 
-    // Error branch: alert first, then write.
-    BuildErrorPatch: main('Slack alert error'),
-    'Slack alert error': main('IF error patch non-empty?'),
-    'IF error patch non-empty?': branch(['PATCH organization error'], ['Skip error patch']),
-    'PATCH organization error': main('POST note error'),
+    // Error branch: alert a human first — if posting the activity also fails,
+    // the ping must still have gone out — then leave the one activity. The
+    // organization is not touched at all.
+    BuildErrorContext: main('Slack alert error'),
+    'Slack alert error': main('POST activity error'),
   };
 
   const workflow = {

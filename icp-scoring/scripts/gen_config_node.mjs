@@ -97,19 +97,43 @@ export function buildConfig() {
     ),
 
     // --- Pipedrive field keys --------------------------------------------
-    f_icp_calculated: field('icp_calculated'),
-    f_icp_score: field('icp_score'),
-    f_icp_scored_at: field('icp_scored_at'),
-    f_icp_model_version: field('icp_model_version'),
-    // Present so BuildOrgPatch can assert it never writes it, and so the
-    // static test can check the key by name rather than by literal.
-    f_icp_final: field('icp_final'),
-    fields_never_write: [field('icp_final')],
+    // v6 writes ONE organization field. Everything else a run produces —
+    // composite, levels, multiplier, the activation guard, the whole trace —
+    // goes to icp_audit, where it can be queried without adding a column to a
+    // CRM record that a rep has to read past.
+    f_auto_icp_score: field('auto_icp_score'),
 
-    // --- Pipedrive enum option ids ---------------------------------------
-    opt_icp_calculated: options('icp_calculated'),
-    label_insufficient: 'Insufficient data',
-    label_error: 'Error',
+    // Never written. Present so BuildOrgPatch can ASSERT it is absent from
+    // every patch rather than merely omitting it, and so the static suite can
+    // name the key without a literal.
+    f_sales_rep_icp_score: field('sales_rep_icp_score'),
+    f_icp_final: field('icp_final'),
+    fields_never_write: [field('sales_rep_icp_score'), field('icp_final')],
+
+    // The four v5 fields, retained ONLY so the static suite can assert no
+    // patch ever contains them. They still exist in the account; whether they
+    // are deleted is Nik's call.
+    f_retired_v5: [
+      field('icp_calculated'), field('icp_score'),
+      field('icp_scored_at'), field('icp_model_version'),
+    ],
+
+    // --- the one written value -------------------------------------------
+    // "56 - B". One string, one meaning, and a rep can read it without a
+    // legend. The insufficient form deliberately keeps the same shape so a
+    // column of these sorts and filters as one thing.
+    auto_score_separator: ' - ',
+    label_insufficient: 'n/a - insufficient data',
+    label_error: 'n/a - error',
+
+    // --- the activity ----------------------------------------------------
+    // One per scoring run, marked done so it lands as a record rather than as
+    // a task in someone's queue. `task` is the generic type this account
+    // actually uses (meeting/email/qualify/renewal/task are the live ones);
+    // Pipedrive has no "note" activity type.
+    activity_type: 'task',
+    activity_subject: 'ICP scored',
+    activity_max_chars: 900,
 
     // --- policy ----------------------------------------------------------
     rescore_after_days: RUBRIC.rescore_after_days,

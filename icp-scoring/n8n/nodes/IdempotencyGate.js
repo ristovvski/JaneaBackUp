@@ -1,19 +1,29 @@
 // IdempotencyGate — should this organization be scored at all?
 //
-// Skip when ALL of:
-//   1. ICP Calculated already holds a real grade, and
-//   2. ICP Model Version equals the current rubric version, and
-//   3. ICP Scored At is younger than CONFIG.rescore_after_days.
+// v6 changes what this can know. The workflow now writes ONE organization
+// field, Auto-ICP Score ("93 - A"), and that field carries no date and no
+// model version — the date and the version live in icp_audit, where the whole
+// trace lives. So the three-part freshness test v5 ran (real grade + current
+// model + younger than the window) has one part left that can be answered from
+// the organization record.
 //
-// Any one failing means re-score. Emits a boolean plus the reason, so the IF
-// downstream is a pure read and the reason reaches the audit row.
+// The rule is therefore: **skip when Auto-ICP Score already holds a real
+// grade.** Clearing the field is what triggers a re-score.
 //
-// Deviation on record (CONFIG.rescore_on_error_or_insufficient, default true):
-// §8.1 says skip when ICP Calculated is PRESENT. Taken literally, an org whose
-// last run errored, or came back Insufficient data, would not be looked at
-// again for 180 days — a transient Clay outage would freeze an account out of
-// scoring for half a year. So only a real grade (ICP A/B/C) counts as a fresh
-// score. Set the flag false in CONFIG to follow §8.1 to the letter.
+// What that costs, stated plainly rather than discovered later:
+//
+//   - The 180-day re-score window is GONE. Nothing on the organization records
+//     when it was scored, so nothing here can age it out.
+//   - A model bump no longer forces a re-score by itself.
+//
+// Both are recoverable, and in the same place: icp_audit holds `ts`,
+// `requested_at` and `model_version` per run, so a lookup on the table would
+// restore both tests exactly. That is a Path A addition against a table that
+// does not exist yet, so it is named here and not guessed at.
+//
+// The deviation that survives: a previous run that came back "insufficient
+// data" is NOT a grade, so it is re-scored rather than freezing the account
+// out. A transient failure must not cost an account its next look.
 
 const cfg = $('CONFIG').item.json;
 const n = $('Normalize').item.json;
@@ -21,59 +31,30 @@ const fetched = $input.first().json;
 const org = fetched.data || fetched;
 const custom = org.custom_fields || {};
 
-const nowIso = cfg.now_iso;
-const now = new Date(nowIso);
-
-const rawCalculated = custom[cfg.f_icp_calculated];
-const rawScoredAt = custom[cfg.f_icp_scored_at];
-const rawModelVersion = custom[cfg.f_icp_model_version];
-const rawScore = custom[cfg.f_icp_score];
-
-// An enum comes back as an option id unless include_option_labels is set, so
-// resolve through CONFIG's option map rather than comparing to a label.
-const optionIdToLabel = {};
-for (const [label, id] of Object.entries(cfg.opt_icp_calculated || {})) {
-  if (id !== null && id !== undefined) optionIdToLabel[String(id)] = label;
-}
-const calculatedLabel = rawCalculated === null || rawCalculated === undefined
+const rawAutoScore = custom[cfg.f_auto_icp_score];
+const autoScore = rawAutoScore === null || rawAutoScore === undefined
   ? null
-  : (optionIdToLabel[String(rawCalculated)] || String(rawCalculated));
+  : String(rawAutoScore).trim();
 
-const gradeLabels = Object.values(cfg.grade_labels || {});
-const isRealGrade = calculatedLabel !== null && gradeLabels.indexOf(calculatedLabel) !== -1;
+// "93 - A" is a grade. "n/a - insufficient data" and "n/a - error" are not:
+// they record that a run happened and produced nothing usable, and the whole
+// point of the deviation above is that such a run gets looked at again.
+const GRADE_PATTERN = /^\s*\d{1,3}\s*-\s*[ABC]\s*$/;
+const isRealGrade = autoScore !== null && autoScore !== '' && GRADE_PATTERN.test(autoScore);
 
-const hasCalculated = cfg.rescore_on_error_or_insufficient
+const hasScore = cfg.rescore_on_error_or_insufficient
   ? isRealGrade
-  : calculatedLabel !== null;
+  : autoScore !== null && autoScore !== '';
 
-const modelMatches = String(rawModelVersion || '') === String(cfg.model_version);
-
-let ageDays = null;
-if (rawScoredAt) {
-  // Pipedrive date fields come back as YYYY-MM-DD; accept a full timestamp too.
-  const scoredAt = new Date(String(rawScoredAt).slice(0, 10) + 'T00:00:00Z');
-  if (!isNaN(scoredAt.getTime())) {
-    ageDays = Math.floor((now.getTime() - scoredAt.getTime()) / 86400000);
-  }
-}
-const isFresh = ageDays !== null && ageDays < cfg.rescore_after_days;
-
-const skip = Boolean(hasCalculated && modelMatches && isFresh);
+const skip = hasScore;
 
 let reason;
 if (skip) {
-  reason = `fresh: ${calculatedLabel} on model ${rawModelVersion}, scored ${ageDays}d ago ` +
-           `(< ${cfg.rescore_after_days}d)`;
-} else if (!hasCalculated) {
-  reason = calculatedLabel === null
-    ? 'never scored'
-    : `previous result "${calculatedLabel}" is not a grade — re-scoring`;
-} else if (!modelMatches) {
-  reason = `model version "${rawModelVersion || '(none)'}" != "${cfg.model_version}" — re-scoring`;
-} else if (ageDays === null) {
-  reason = 'no usable ICP Scored At date — re-scoring';
+  reason = `already scored: "${autoScore}" — clear Auto-ICP Score to re-score`;
+} else if (autoScore === null || autoScore === '') {
+  reason = 'never scored';
 } else {
-  reason = `stale: scored ${ageDays}d ago (>= ${cfg.rescore_after_days}d) — re-scoring`;
+  reason = `previous result "${autoScore}" is not a grade — re-scoring`;
 }
 
 return [{
@@ -91,12 +72,8 @@ return [{
     org_state: (org.address && org.address.admin_area_level_1) || null,
 
     existing: {
-      calculated_option_id: rawCalculated === undefined ? null : rawCalculated,
-      calculated_label: calculatedLabel,
-      score: rawScore === undefined ? null : rawScore,
-      scored_at: rawScoredAt || null,
-      model_version: rawModelVersion || null,
-      age_days: ageDays,
+      auto_icp_score: autoScore,
+      is_real_grade: isRealGrade,
     },
   },
 }];
