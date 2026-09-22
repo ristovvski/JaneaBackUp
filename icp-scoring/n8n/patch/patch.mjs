@@ -432,7 +432,15 @@ export function buildWorkflow() {
     position: [140, 700],
   });
 
-  nodes.push(codeNode('Dedupe B', [340, 700], code('Dedupe')));
+  // Dedupe B carries an error output for the same reason ParseScored does.
+  // It is the FIRST Code node on Path B, so anything it throws happens
+  // upstream of every safety net — execution 65816 died there with the message
+  // masked to "Unknown error [line 95]", no problem list, no activity, and no
+  // ledger release. Routed here, any future throw still reaches the loud
+  // branch with an organization named on it.
+  nodes.push(codeNode('Dedupe B', [340, 700], code('Dedupe'), {
+    onError: 'continueErrorOutput',
+  }));
 
   // There is no Score node. The table scores; ParseScored checks that what
   // arrived can be written and hands it on flat. v6.0 held the rubric here and
@@ -498,14 +506,26 @@ export function buildWorkflow() {
   // Alert BEFORE the writes, with continue-on-fail: if marking the org as
   // Errored also fails, the human ping must still have gone out. This is the
   // one allow-listed continueOnFail in the workflow.
+  // The message has to stand on its own in Slack, because whoever reads it has
+  // not opened the execution. error_name and error_message alone do not:
+  // n8n's task runner masks a thrown error down to "IcpUnknownError: unknown
+  // error", which is what this alert said for execution 65816 and said nothing.
+  // The PROBLEM LIST is the part worth paging someone about, and
+  // BuildErrorContext re-derives it by re-validating, so it survives.
   nodes.push(slackNode(
     'Slack alert error',
     [1140, 900],
     'B',
-    '=:rotating_light: ICP scoring failed. ' +
-    'org_id={{ $json.org_id }} request_id={{ $json.request_id }} ' +
-    'execution_id={{ $execution.id }} ' +
-    'error={{ $json.error_name }}: {{ $json.error_message }}',
+    // A newline INSIDE a {{ }} has to be the escape sequence, not a real line
+    // break: n8n parses the braces as JavaScript and a literal newline inside a
+    // string literal there is a syntax error the node reports as
+    // {"error":"invalid syntax"} — silently, because this node continues on
+    // fail. Outside the braces a real newline is fine.
+    '=:rotating_light: ICP scoring failed — nothing was written, and Clay was answered 200 so it does not know.\n' +
+    '*org* {{ $json.org_id || "(none)" }}  *request* {{ $json.request_id || "(none)" }}  ' +
+    '*execution* {{ $execution.id }}\n' +
+    '{{ $json.problem_count > 0 ? "*" + $json.problem_count + " problem(s) with the event:*" : "*error:* " + $json.error_name + ": " + $json.error_message }}\n' +
+    '{{ $json.problem_count > 0 ? "• " + $json.problems.join("\\n• ") : "" }}',
     { continueOnFail: true, ...NO_RETRY }
   ));
 
@@ -536,6 +556,22 @@ export function buildWorkflow() {
       "'CHECK: this is a system fault, not a judgement about the company — the run trace has the detail.'" +
       `}, ${errRef}.deal_id ? { deal_id: Number(${errRef}.deal_id) } : {})) }}`,
   }, NO_RETRY));
+
+  // An activity needs an organization to live on. When the event never carried
+  // an org_id — as when the Clay column dropped its four identity fields —
+  // there is nothing to address it to, and Number(null) is 0, which Pipedrive
+  // rejects outright ("Bad request"). Worse, when it does NOT reject, the
+  // activity lands on no record at all and is invisible; that is what activity
+  // 46842 was. So the failure is reported to Slack either way, and the
+  // activity is attempted only when there is somewhere to put it.
+  nodes.push(ifNode('IF error has an org?', [1540, 820], [
+    {
+      id: 'error-has-org',
+      leftValue: "={{ $('BuildErrorContext').item.json.org_id }}",
+      rightValue: '',
+      operator: { type: 'number', operation: 'exists', singleValue: true },
+    },
+  ]));
 
   // Wired LAST on the error branch so everything else has already run.
   nodes.push(codeNode('FailLoudly', [1940, 820], code('FailLoudly')));
@@ -586,7 +622,7 @@ export function buildWorkflow() {
     'Webhook Clay': main('Respond 200 B'),
     'Respond 200 B': main('CONFIG B'),
     'CONFIG B': main('Dedupe B'),
-    'Dedupe B': main('ParseScored'),
+    'Dedupe B': { main: [out('ParseScored'), out('BuildErrorContext')] },
     // ParseScored's second output is its error branch (onError:
     // continueErrorOutput): a malformed event goes straight to the failure
     // branch, which alerts, records, and then THROWS so the execution ends red.
@@ -619,7 +655,10 @@ export function buildWorkflow() {
     // the ping must still have gone out — then leave the one activity. The
     // organization is not touched at all.
     BuildErrorContext: main('Slack alert error'),
-    'Slack alert error': main('POST activity error'),
+    'Slack alert error': main('IF error has an org?'),
+    // No organization to address means no activity — both branches still end
+    // at FailLoudly, so the execution goes red either way.
+    'IF error has an org?': branch(['POST activity error'], ['FailLoudly']),
     // Last, and it throws. The alert and the activity have already happened;
     // the throw is what turns a quietly-successful execution red so
     // settings.errorWorkflow (WF-ERR) fires and the failure reaches Slack.

@@ -443,11 +443,25 @@ describe('continueOnFail is allow-listed', () => {
     assert.deepEqual(CONTINUE_ON_FAIL_ALLOWLIST, ['Slack alert error']);
   });
 
-  test('and it really is posted before the activity on its branch', () => {
+  test('and it really is posted before anything else on its branch', () => {
+    // The alert is first because it is the one thing that must happen. The
+    // activity comes after it and is CONDITIONAL: an activity needs an
+    // organization to live on, and an event that never carried an org_id has
+    // nowhere to put one — Number(null) is 0, which Pipedrive rejects, and
+    // when it does not reject the activity lands on no record at all and is
+    // invisible. That is what activity 46842 was.
     assert.deepEqual(wf.connections.BuildErrorContext.main[0].map((t) => t.node), ['Slack alert error']);
     assert.deepEqual(
       wf.connections['Slack alert error'].main[0].map((t) => t.node),
-      ['POST activity error']
+      ['IF error has an org?']
+    );
+    const [hasOrg, noOrg] = wf.connections['IF error has an org?'].main;
+    assert.deepEqual(hasOrg.map((t) => t.node), ['POST activity error']);
+    assert.deepEqual(noOrg.map((t) => t.node), ['FailLoudly'], 'no org, no activity — but still red');
+    // Both branches end red, so the execution reaches WF-ERR either way.
+    assert.deepEqual(
+      wf.connections['POST activity error'].main[0].map((t) => t.node),
+      ['FailLoudly']
     );
   });
 
@@ -688,6 +702,38 @@ describe('the graph', () => {
       wf.connections['PATCH organization'].main[0].map((t) => t.node),
       ['BuildActivity']
     );
+  });
+
+  test('no {{ }} expression contains a real newline', () => {
+    // n8n parses the braces as JavaScript, so a literal line break inside a
+    // string literal there is a syntax error — reported as
+    // {"error":"invalid syntax"} and, on a continueOnFail node, swallowed.
+    // Outside the braces a real newline is ordinary text.
+    for (const node of wf.nodes) {
+      const params = nodeParams(node);
+      for (const [, span] of params.matchAll(/\{\{([\s\S]*?)\}\}/g)) {
+        assert.ok(
+          !span.includes('\n'),
+          `${node.name}: an expression contains a real newline — write it as \\n`
+        );
+      }
+    }
+  });
+
+  test('every Code node before the write gate has an error output', () => {
+    // Anything that throws upstream of BuildErrorContext dies with no problem
+    // list, no activity, no ledger release, and — because n8n's task runner
+    // masks a thrown error — a message nobody can act on. Execution 65816 was
+    // Dedupe B doing exactly that.
+    for (const name of ['Dedupe B', 'ParseScored']) {
+      const node = byName.get(name);
+      assert.ok(node, `${name} must exist`);
+      assert.equal(node.onError, 'continueErrorOutput', `${name} must route failures, not die`);
+      const outputs = (wf.connections[name] || { main: [] }).main;
+      assert.equal(outputs.length, 2, `${name} must have both outputs wired`);
+      assert.deepEqual(outputs[1].map((t) => t.node), ['BuildErrorContext'],
+        `${name}'s error output must reach the loud branch`);
+    }
   });
 
   test('every non-duplicate Path B run reaches exactly one activity', () => {

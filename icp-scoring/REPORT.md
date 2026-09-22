@@ -2008,3 +2008,98 @@ Which a rep reads as:
 > **Score 78.0 × 0.80 = 62**
 >
 > Buying signal (not scored): 0 — No job postings or funding rounds are recorded, so no buying signal is detectable.
+
+---
+
+## 21. "failed at Dedupe B" — 2026-09-22
+
+Execution **65816**, 11:37 UTC. The cause is one line in the Clay column; the
+reason the alert was useless is four separate gaps in this workflow, and those
+are the part worth keeping.
+
+### The cause: the note edit took four fields with it
+
+The body that arrived carried **16 keys** — every scoring field, and the new
+HTML note, which works exactly as intended:
+
+```
+activation_used, composite, confidence_overall, final, final_without_activation,
+flags, geo_level, grade, industry_level, multiplier, note, revenue_level,
+stage_level, status, tier2_candidate, type_level
+```
+
+Missing: **`request_id`, `org_id`, `deal_id`, `requested_at`** — the four
+identity keys echoed from the table's webhook input columns. They are not
+scoring fields, so the replacement of the `note: [...]` block appears to have
+replaced the object around them too.
+
+**Nothing in n8n needs changing for that.** The column has to put the four back.
+`engine/clay_callback_column.md` is the contract: eight required keys, and the
+first five are echoed from the input columns, not derived.
+
+### Why the alert said nothing: four gaps
+
+**1. `Dedupe B` was a boundary, and it is the wrong place to be one.** It threw
+on a missing `request_id`. It is the FIRST Code node on Path B, so the throw
+happened upstream of `BuildErrorContext`, `FailLoudly` and every other safety
+net built for exactly this. No problem list, no activity, no ledger release.
+
+Dedupe's job is *do not process the same request twice*. With no key there is
+nothing to dedupe, so it now **skips the ledger and passes through unkeyed**,
+and `ParseScored` — which lists every violation at once and routes to the loud
+branch — does the refusing. Two keyless callbacks no longer collide, which was
+the original reason for the throw.
+
+**2. `Dedupe B` had no error output.** It does now, into `BuildErrorContext`,
+so any future throw there still reaches the loud branch. A static test asserts
+both it and `ParseScored` carry `continueErrorOutput` wired to the error branch
+— nothing before the write gate may die outside it.
+
+**3. The failure activity was attempted with no organization.** `org_id` was
+genuinely absent, `Number(null)` is `0`, and Pipedrive answered *Bad request*,
+which broke the branch before `FailLoudly`. A new `IF error has an org?` sends
+that case straight to `FailLoudly`: no organization, no activity — and still
+red, so `WF-ERR` fires either way. An activity on no record is the orphan that
+activity 46842 already was.
+
+**4. The Slack alert repeated the masked error instead of the problem list.**
+`error_name` and `error_message` are what n8n's task runner leaves after
+masking — `IcpUnknownError: unknown error`, which is what the alert actually
+said. `BuildErrorContext` re-derives the real list by re-validating, so the
+alert now leads with that.
+
+Fixing 4 exposed a fifth: the first version came back
+`{"error":"invalid syntax"}` and was swallowed by `continueOnFail`. **A newline
+inside a `{{ }}` must be the escape sequence, not a real line break** — n8n
+parses the braces as JavaScript. Now pinned by a static test that scans every
+expression span in the graph.
+
+### Before and after, same payload
+
+Execution 65816:
+
+```
+Dedupe B  ERROR  Unknown error [line 95]
+```
+
+Execution 65825, the identical body replayed:
+
+```
+:rotating_light: ICP scoring failed — nothing was written, and Clay was answered 200 so it does not know.
+*org* (none)  *request* (none)  *execution* 65825
+*8 problem(s) with the event:*
+• missing "request_id"
+• missing "org_id"
+• missing "deal_id"
+• missing "requested_at"
+• request_id must be a non-empty string
+• org_id must be a positive integer, got undefined
+• deal_id must be an integer or null, got undefined
+• requested_at must be an ISO timestamp
+```
+
+`Webhook Clay -> Respond 200 B -> CONFIG B -> Dedupe B -> ParseScored ->
+BuildErrorContext -> Slack alert error -> IF error has an org? -> FailLoudly`,
+ending **ERROR**, so `WF-ERR` posts as well.
+
+38 nodes, 641 tests green.

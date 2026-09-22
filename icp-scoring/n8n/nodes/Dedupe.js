@@ -92,15 +92,29 @@ if (path === 'A') {
   // twice.
   const requestId = raw.request_id === undefined || raw.request_id === null ? '' : String(raw.request_id);
   if (requestId === '') {
-    const error = new Error(
-      'ICP_MALFORMED_EVENT: the scored event has no request_id, so every callback ' +
-      'would share one ledger key and all but the first would be dropped'
-    );
-    error.name = 'IcpMalformedEvent';
-    throw error;
+    // No key, so nothing to dedupe — and DEDUPE IS NOT THE BOUNDARY.
+    //
+    // This used to throw. It was the wrong place to refuse an event, and
+    // execution 65816 is what that costs: the Clay column had dropped
+    // request_id, org_id, deal_id and requested_at, and this node threw
+    // BEFORE ParseScored, which is upstream of every safety net on Path B.
+    // No BuildErrorContext, so no problem list. No Slack detail, no activity,
+    // no ledger release — and n8n's task runner masked the message down to
+    // "Unknown error [line 95]", so the alert that did fire said nothing
+    // anyone could act on.
+    //
+    // ParseScored lists EVERY violation at once and routes to the loud branch.
+    // So this node's job here is only to avoid poisoning the ledger: pass the
+    // event through with no key and let the boundary do the refusing.
+    key = null;
+  } else {
+    // event_id is optional and sharpens the key when the table sends one: with
+    // it, a deliberate re-run of the same row is a new event; without it, a
+    // second callback for the same request_id is a duplicate and is recorded
+    // as one rather than being scored twice.
+    const eventId = raw.event_id === undefined || raw.event_id === null ? '' : String(raw.event_id);
+    key = `clay:scored:${requestId}:${eventId === '' ? '-' : eventId}`;
   }
-  const eventId = raw.event_id === undefined || raw.event_id === null ? '' : String(raw.event_id);
-  key = `clay:scored:${requestId}:${eventId === '' ? '-' : eventId}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,8 +128,11 @@ for (const k of Object.keys(sd.seen)) {
   if (now - sd.seen[k] > ttlMs) delete sd.seen[k];
 }
 
-const duplicate = Boolean(sd.seen[key]);
-if (!duplicate) sd.seen[key] = now;
+// A null key never enters the ledger and is never a duplicate: there is
+// nothing to compare it to, and writing one would make every keyless event
+// collide with every other.
+const duplicate = key !== null && Boolean(sd.seen[key]);
+if (key !== null && !duplicate) sd.seen[key] = now;
 
 // ---------------------------------------------------------------------------
 // Anomaly gate: events per hour, counted here because this node already owns
@@ -135,6 +152,9 @@ return [{
   json: {
     _path: path,
     _dedupe_key: key,
+    // Stated, so a reader of the run can tell "this was not deduped" from
+    // "this was deduped and was new".
+    _dedupe_skipped: key === null,
     _duplicate: duplicate,
     _rate_this_hour: rateThisHour,
     _rate_exceeded: rateExceeded,

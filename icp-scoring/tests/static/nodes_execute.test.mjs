@@ -160,15 +160,47 @@ describe('Dedupe', () => {
     assert.equal(again.length, 1);
   });
 
-  test('a Clay callback with no request_id throws rather than poisoning the ledger', () => {
-    // v5 needed request_id AND event_id. v6 sends no event_id at all, so the
-    // key is request_id plus whatever event_id happens to be there — and
-    // request_id alone is now the thing that must never be missing, because
-    // without it every callback shares one key and all but the first is
-    // silently dropped.
+  test('a Clay callback with no request_id passes through UNKEYED, and does not throw', () => {
+    // It used to throw here, and that was the wrong place to refuse an event.
+    // Dedupe B is the first Code node on Path B, so a throw happens upstream of
+    // every safety net: execution 65816 died here with no problem list, no
+    // activity, no ledger release, and n8n's task runner masked the message
+    // down to "Unknown error [line 95]".
+    //
+    // Dedupe's job is "do not process the same request twice". With no key
+    // there is nothing to dedupe, so it skips the ledger and lets ParseScored
+    // — which lists every violation at once and routes to the loud branch —
+    // do the refusing.
     const event = clayFixture('icp_scored_A.json');
     delete event.request_id;
-    assert.throws(() => dedupeB(event, {}), /ICP_MALFORMED_EVENT/);
+    const staticData = {};
+    const [out] = dedupeB(event, staticData);
+    assert.equal(out.json._dedupe_key, null);
+    assert.equal(out.json._dedupe_skipped, true);
+    assert.equal(out.json._duplicate, false);
+    assert.deepEqual(staticData.global.seen, {}, 'a keyless event must not enter the ledger');
+  });
+
+  test('two keyless callbacks are both let through, never collapsed into one', () => {
+    // The old throw existed to stop every keyless callback sharing one ledger
+    // key. Skipping the ledger achieves that properly: neither is a duplicate
+    // of the other, and both reach the boundary to be refused on their own.
+    const staticData = {};
+    const a = clayFixture('icp_scored_A.json'); delete a.request_id;
+    const b = clayFixture('icp_scored_B_stable.json'); delete b.request_id;
+    assert.equal(dedupeB(a, staticData)[0].json._duplicate, false);
+    assert.equal(dedupeB(b, staticData)[0].json._duplicate, false);
+    assert.deepEqual(staticData.global.seen, {});
+  });
+
+  test('the boundary still refuses it, with every problem named', () => {
+    const event = clayFixture('icp_scored_A.json');
+    delete event.request_id;
+    assert.throws(() => parseScored(event), (error) => {
+      assert.equal(error.name, 'IcpMalformedEvent');
+      assert.ok(error.problems.some((p) => /missing "request_id"/.test(p)));
+      return true;
+    });
   });
 
   test('an event_id, when the table sends one, separates two runs of the same request', () => {
@@ -186,9 +218,12 @@ describe('Dedupe', () => {
     // v5 detected Path B by `event === "icp.scored"`; v6's consolidated event
     // has no such key. An empty body down the Clay webhook must still be
     // recognised as Path B — and fail for the right reason.
-    assert.throws(() => dedupeB({}, {}), /ICP_MALFORMED_EVENT/);
+    const [out] = dedupeB({}, {});
+    assert.equal(out.json._path, 'B', 'an empty body down the Clay webhook is still Path B');
+    assert.equal(out.json._dedupe_key, null);
     // And a Path B body arriving down the Pipedrive webhook is a Path A
-    // delivery with no meta.id, which is the other error entirely.
+    // delivery with no meta.id, which IS still fatal: there is no per-delivery
+    // id to dedupe on and Path A has no boundary node to refuse it later.
     assert.throws(() => dedupeA(clayFixture('icp_scored_A.json'), {}), /ICP_UNKNOWN_PAYLOAD/);
   });
 
