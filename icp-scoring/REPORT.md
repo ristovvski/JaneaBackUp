@@ -1913,3 +1913,98 @@ Deal 2274 scored 22587 earlier; deal 2278 scored 22589. Each is scored on its
 own, and a rep looking at the wrong one sees an empty field. Same shape as the
 six Sumersports records found in Phase 0 — the workflow scores the organization
 the deal points at, and cannot know the two are the same company.
+
+---
+
+## 20. The activity note renders as HTML — 2026-09-22
+
+The note landed as one run-on paragraph. The cause is not that Pipedrive
+"collapses `\n`" in some special way: **the activity note field is HTML**, and
+to a browser a newline is whitespace. Measured on this account rather than
+read from the docs — ten probes written to activity 46845 and read back:
+
+| sent | came back | reading |
+|---|---|---|
+| `<b>x</b>`, `<strong>`, `<i>`, `<br>`, `<p>`, `<ul><li>` | verbatim | allowed |
+| `<div>a</div>` | `\n<div>a</div>` | allowed, reformatted |
+| `<script>alert(1)</script>` | **`""`** | sanitiser drops it, and the note with it |
+| `a < b and 5 > 3` | `a &lt; b and 5 &gt; 3` | **plain text is HTML-escaped** |
+| `R&D team` | `R&amp;D team` | ampersands too |
+| `a &lt; b` | verbatim | already-escaped text is left alone |
+| `Header\r\n\r\nwhy` | `Header \n \nwhy` | CRLF is mangled — a space is inserted |
+| `Header\n\nwhy` | verbatim | stored, then collapses on render |
+| `— · × – ≥` | verbatim | unicode is safe |
+
+The escaping row settles it. Pipedrive turning a stray `<` into `&lt;` on the
+way **in** only makes sense if it renders as HTML on the way **out**.
+
+**So option (a), HTML. Option (b) is not available**: `\r\n\r\n` does not
+survive storage intact, and even `\n\n`, which does, renders as nothing.
+
+Two consequences for the formula that writes the note:
+
+1. **Never `\n` or `\r\n` for layout.**
+2. **Escape nothing.** Pipedrive escapes stray `<`, `>` and `&` itself and
+   leaves `&lt;` alone when it is already an entity, so hand-escaping would
+   double-escape and a rep would read `&amp;lt;`.
+
+### This is a Clay change, not an n8n change
+
+`BuildActivity` writes `note` verbatim and a test asserts byte equality against
+the event. A second test now pins that HTML specifically survives untouched —
+not escaped, not stripped, not re-wrapped — so the formatting a rep sees is
+decided entirely in the table's formula column.
+
+The paste-ready replacement for that column's `note: [...]` block, the full
+probe table and the layout are in **`engine/clay_note_format.md`**.
+
+### Verified end to end
+
+The block in that file was run against the live Intellistack row's real values
+and produces 1,320 characters, byte-identical to the note that then went
+through the whole pipeline — Clay body → Path B → `ParseScored` →
+`BuildActivity` → `POST activity` — and landed on **activity 47033** (org
+22586, deal 2277), execution **65642**:
+
+```
+note stored === note Clay sent:  true
+tags survived the whole chain:   true
+```
+
+### The raw note as stored
+
+`tests/fixtures/clay/note_html_rendered.txt`, and inline here — this is the
+exact string sitting in Pipedrive on activity 47033:
+
+```html
+<b>ICP B (62/100) · confidence medium</b><br><br><b>Industry 7/10 · SaaS — Other</b><br>Sells horizontal no-code workflow, forms, eSignature, and contract software across many industries — a general SaaS vendor.<br><br><b>Type 10/10</b><br>Named cloud products, demos, integrations, and a 63-person engineering team show software is the business.<br><br><b>Stage 3/10</b><br>With no recorded funding and missing normalized hiring metrics, this 2006 company best fits mature steady-state, but capacity pressure remains unknown.<br><br><b>Geography 10/10</b><br>Headquarters is in Denver, Colorado, placing Intellistack inside the primary US market.<br><br><b>Revenue 10/10 · $25M–$500M via apollo</b><br>Apollo estimates $55.3M, about $230K per employee, a plausible software-company level that falls within the $25M–$500M band.<br><br><b>Hiring 0 eng open, 0 ≥60d, leaders: none</b><br>No job postings were provided, so no open engineering roles, aged roles, or leadership hires are detectable.<br><br><b>Activation Stable ×0.80</b><br>No recorded funding and flat annual headcount provide no evidence of a current transformation, so the company appears stable.<br><br><b>Score 78.0 × 0.80 = 62</b><br><br>Buying signal (not scored): 0 — No job postings or funding rounds are recorded, so no buying signal is detectable.
+```
+
+Which a rep reads as:
+
+> **ICP B (62/100) · confidence medium**
+>
+> **Industry 7/10 · SaaS — Other**
+> Sells horizontal no-code workflow, forms, eSignature, and contract software across many industries — a general SaaS vendor.
+>
+> **Type 10/10**
+> Named cloud products, demos, integrations, and a 63-person engineering team show software is the business.
+>
+> **Stage 3/10**
+> With no recorded funding and missing normalized hiring metrics, this 2006 company best fits mature steady-state, but capacity pressure remains unknown.
+>
+> **Geography 10/10**
+> Headquarters is in Denver, Colorado, placing Intellistack inside the primary US market.
+>
+> **Revenue 10/10 · $25M–$500M via apollo**
+> Apollo estimates $55.3M, about $230K per employee, a plausible software-company level that falls within the $25M–$500M band.
+>
+> **Hiring 0 eng open, 0 ≥60d, leaders: none**
+> No job postings were provided, so no open engineering roles, aged roles, or leadership hires are detectable.
+>
+> **Activation Stable ×0.80**
+> No recorded funding and flat annual headcount provide no evidence of a current transformation, so the company appears stable.
+>
+> **Score 78.0 × 0.80 = 62**
+>
+> Buying signal (not scored): 0 — No job postings or funding rounds are recorded, so no buying signal is detectable.

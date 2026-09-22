@@ -859,6 +859,24 @@ describe('BuildActivity — the table\'s note, verbatim', () => {
     }
   });
 
+  test('HTML markup reaches Pipedrive untouched', () => {
+    // Pipedrive renders an activity note as HTML — measured on this account:
+    // it escapes a stray "<" into "&lt;" on the way in, which only makes sense
+    // if it renders on the way out, and it is why a "\n" collapses the whole
+    // note into one paragraph. So the table sends <b> and <br>, and n8n must
+    // not touch, escape, strip or re-wrap any of it.
+    const html = readFileSync(
+      join(ROOT, 'tests', 'fixtures', 'clay', 'note_html_rendered.txt'), 'utf8'
+    ).replace(/\n$/, '');
+    const parsed = scored('icp_scored_A.json');
+    parsed.note = html;
+    const [out] = buildActivity(parsed);
+    assert.equal(out.json.body, html, 'byte-identical, tags and all');
+    assert.match(out.json.body, /<b>/);
+    assert.match(out.json.body, /<br><br>/);
+    assert.ok(!out.json.body.includes('&lt;'), 'n8n must not escape what Pipedrive escapes itself');
+  });
+
   test('a long note is NOT trimmed — verbatim means verbatim', () => {
     const event = clayFixture('icp_scored_A.json');
     event.note = `${event.note}\n${'x'.repeat(4000)}`;
