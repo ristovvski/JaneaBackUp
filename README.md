@@ -1,64 +1,51 @@
-# Janea GTM automation — documentation
+# Janea GTM automation — the estate, documented and operable
 
-The written record of the Janea Systems go-to-market automation estate: what it is, how it behaves,
-what has broken, and what was decided about it. Every document here was produced while building or
-repairing the running system — nothing is aspirational.
+The written record and the operating code of the Janea Systems go-to-market automation estate: what
+it is, how it behaves, what has broken, what was decided about it, and the scripts that change it.
 
-**This repository is internal.** It contains prospect names and email addresses, internal Slack
-audits, and operational runbooks. Read [SECURITY.md](SECURITY.md) before changing its visibility or
-adding anything to it.
+**New operator? Start here, in this order:**
+
+1. [`README_OPERATOR.md`](README_OPERATOR.md) — what to check every morning, how to read an
+   execution, how to deploy a change, the never-list, where each secret lives.
+2. [`ACCESS_MAP.md`](ACCESS_MAP.md) — every system, the role you need, and what you cannot diagnose
+   without each one.
+3. [`SECURITY.md`](SECURITY.md) — what was removed from this repository and why. Read it before
+   adding anything.
 
 ## The estate in one paragraph
 
 Two webhook **receivers** turn provider events into CRM truth: **WF-1** for HeyReach (LinkedIn) and
 **WF-2** for Smartlead (email). Each normalises an event, resolves or creates the person and the
-campaign-scoped lead in **Pipedrive**, writes an activity, applies labels, and decides whether a
-human should be told in Slack. Behind them sit **reconcilers** — WF-2S polls Smartlead statistics
-because Smartlead never delivers `EMAIL_SENT` to us, and WF-2R replays missed replies — plus the
-**DNC ledger**, the suppression registry every outbound list is supposed to be filtered against.
-Shared state (alert de-duplication, SENT claims) lives in an n8n **data table**, not in workflow
-staticData, because staticData persists as one object and overlapping executions overwrite each
-other's work.
+campaign-scoped lead in **Pipedrive**, writes an activity, applies labels, decides whether the team
+should be alerted in Slack, and files the replier in the **DNC registry**. **Reconcilers** recover what
+the webhooks miss (Smartlead never sends us its SENT events). Shared state lives in an n8n **data
+table**, never in workflow staticData. The DNC registry is mirrored into **Supabase**. Company **ICP
+scoring** (Phase 1, DEV) lives in [`icp-scoring/`](icp-scoring).
 
-## Where to start
+## Layout
 
-| If you want to… | Read |
+| path | what |
 |---|---|
-| understand the whole system | [`docs/WF1_W1.0.1_build/wf1-system-reference.md`](docs/WF1_W1.0.1_build/wf1-system-reference.md) — the definitive reference |
-| know the standing rules | [`docs/RULEBOOK.md`](docs/RULEBOOK.md) |
-| understand the DNC registry | [`docs/dnc-architecture.md`](docs/dnc-architecture.md) |
-| see what exists, stage by stage | [`docs/SYSTEM_DOCS_2026-09-02/`](docs/SYSTEM_DOCS_2026-09-02) |
-| know how a class of bug keeps recurring | [`docs/CLASS_MAP_2026-09-02/`](docs/CLASS_MAP_2026-09-02) |
-| find what happened on a given day | [`docs/task-logs/`](docs/task-logs) |
-| know *why* a decision was made | [`chat-history/RULINGS_AND_INSTRUCTIONS.md`](chat-history/RULINGS_AND_INSTRUCTIONS.md) |
-| browse everything | [`INDEX.md`](INDEX.md) |
+| `docs/` | every document **and script** from the working directory, path-for-path — the definitive reference is `docs/WF1_W1.0.1_build/wf1-system-reference.md`, the rules are `docs/RULEBOOK.md`, daily history is `docs/task-logs/` |
+| `chat-history/RULINGS_AND_INSTRUCTIONS.md` | every human instruction, chronological and verbatim — the decision record |
+| `icp-scoring/` | the ICP scoring engine, contracts, n8n nodes, statics and golden set |
+| `ops/` | operational scripts — `heyreach_webhook_scope.mjs` **must be run after every new HeyReach campaign** |
+| [`INDEX.md`](INDEX.md) | every document, grouped |
 
-## The two halves
-
-**`docs/`** — 339 markdown documents, path-for-path as they were written. They cross-reference each
-other by relative path, so the layout is deliberately unchanged; [`INDEX.md`](INDEX.md) provides the
-grouping instead of a re-filing.
-
-**`chat-history/`** — the working sessions that produced all of it, rendered readable. 35 sessions,
-705 human instructions, from 2026-07-23 onward. Human turns are verbatim; assistant prose is kept;
-tool calls are collapsed to one line each; tool results and model reasoning are dropped. The
-chronological instruction log is the decision record — when a rule is disputed later, it settles
-what was actually asked for, and when.
+Paths under `docs/` mirror the working directory exactly because the documents cross-reference each
+other by relative path.
 
 ## The one lesson worth reading twice
 
-The failure that keeps recurring in this estate is not the crash. It is the **write that reports
-success while achieving nothing, or the wrong thing** — an HTTP 200 on an activity attached to the
-wrong lead, an idempotency footer that Pipedrive's HTML note field silently emptied, a registry that
-lost 113 claims to overlapping executions, 53 leads created with a null person because `$json` does
-not survive an HTTP node. None of these raised an error. Every one was found only by re-deriving the
-state that *should* exist and comparing. Several sections of the reference doc exist purely to name
-these shapes so they are recognisable on sight.
+The failure that keeps recurring here is not the crash. It is the **write that reports success while
+achieving nothing, or the wrong thing** — an HTTP 200 on an activity attached to the wrong lead, a
+registry that lost claims to overlapping executions, a dry run that announced "chunk done", a verifier
+that called 47 empty commits clean. None raised an error. Each was found only by re-deriving what
+*should* exist and comparing. When you change something, the acceptance test is a read-back of the
+real record, and every test suite must include a case the old code fails.
 
 ## Conventions
 
-* Dates are ISO, in the project's working calendar.
-* A document describes what was **measured**, not what was expected. Where a number is an estimate,
-  it says so.
-* Task logs record four states: done / partial / blocked / improvable. Partial and blocked are not
-  omitted to make a log look tidy.
+* A document states what was **measured**. Where a number is an estimate, it says so.
+* Task logs record done / partial / blocked / improvable. Partial and blocked are never omitted.
+* People in these documents appear as `Person-<h8>` / `pii-<h8>@example.invalid`; see `SECURITY.md`.
