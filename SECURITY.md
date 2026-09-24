@@ -6,10 +6,20 @@ It holds operational runbooks, internal Slack audits that quote colleagues, and 
 to the CRM. Personal data about prospects has been pseudonymized (below), but the documents still
 describe real campaigns and real companies. Do not change its visibility.
 
-## Removed from the ENTIRE history, not just the current tree
+## The history is NOT clean yet: do not add collaborators
 
-A collaborator can read every commit, so cleaning only the latest one protects nothing. On
-2026-09-24 every commit was rewritten blob by blob, and the rewritten history is what `main` now is.
+Everything below is removed from the **current tree** of `main` (the 2026-09-24 scrub commit and
+everything after it). It is **still in the git history**: every commit before that scrub, including
+the ICP branch's 45 commits and the original export, carries the webhook paths and the raw session
+transcripts. A collaborator can read every commit, so until the history is rewritten this repository
+must not be shared with anyone new.
+
+The rewrite (filter-repo) is postponed on purpose: only after branch cleanup, and only from a state
+with a verified backup bundle. A rewritten copy of the history already exists locally
+(`handover-main`, gate-clean across all its commits) but was not pushed, because pushing it means a
+force-push of `main`.
+
+## Removed from the current tree
 
 **Credentials and callable endpoints**
 
@@ -23,7 +33,7 @@ path is enough to inject fabricated reply events, create leads, fire alerts and 
 
 **Why this had to be redone.** The 9-08 export only redacted the `/webhook/<path>` form. Every *bare*
 mention of the two production receiver paths — in inventory tables, prose, class maps — went through,
-and sat on `main` in 11 and 12 blobs until this rewrite. The rule is now built from the list of paths
+and sat on `main` in 11 and 12 blobs (they still do, in the history). The rule is now built from the list of paths
 n8n actually serves, and it matches the path itself, not a URL shape.
 
 **People**
@@ -45,7 +55,8 @@ it does not reach zero by construction.
 
 **Removed outright**
 
-* `chat-history/sessions/` — the raw working-session transcripts, from every commit. They were bulk
+* `chat-history/sessions/` — the raw working-session transcripts, from the tree (still in the history,
+  see above). They were bulk
   person data by nature: every prospect ever discussed, in context, with company and title, and still
   re-identifiable after pseudonymization. The decision record
   (`chat-history/RULINGS_AND_INSTRUCTIONS.md`) stays, cleaned.
@@ -68,6 +79,10 @@ it does not reach zero by construction.
 `gtm_docs_export/verify_history.py <ref>` scans **every blob and every commit message reachable from
 the ref** for six things — `.env` values, registered webhook paths, callable host+`/webhook` URLs,
 external emails, LinkedIn profiles, prospect names — and exits 0 only if all six are zero.
+
+Run over `main` it reports DIRTY today, by design: the history under the scrub commit has not been
+rewritten. What a pull request must pass is the same six checks over **the tip tree plus every blob and
+commit message the PR adds**: `verify_history.py --new-since origin/main <branch>`.
 
 It refuses a vacuous pass: a history with no blobs, or an empty tip, is reported as a **failure**.
 That floor exists because the first run of the rewrite produced 47 commits with empty trees and the

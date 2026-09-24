@@ -296,6 +296,7 @@ Start with [README_OPERATOR.md](README_OPERATOR.md) and [ACCESS_MAP.md](ACCESS_M
 * [task-logs/2026-09-22_org-linkedin-not-website.md](docs/task-logs/2026-09-22_org-linkedin-not-website.md)
 * [task-logs/2026-09-24_audit-full-health-check-7d.md](docs/task-logs/2026-09-24_audit-full-health-check-7d.md)
 * [task-logs/2026-09-24_bus-factor-handover.md](docs/task-logs/2026-09-24_bus-factor-handover.md)
+* [task-logs/2026-09-24_docs-repo-push-and-stefan-package.md](docs/task-logs/2026-09-24_docs-repo-push-and-stefan-package.md)
 * [task-logs/2026-09-24_health-check-followups.md](docs/task-logs/2026-09-24_health-check-followups.md)
 
 ## TOMBSTONE_DELETE_build

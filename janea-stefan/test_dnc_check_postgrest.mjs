@@ -5,13 +5,16 @@
 //
 //   SUPABASE_URL=https://<project>.supabase.co  SUPABASE_KEY=<publishable key>  node test_dnc_check_postgrest.mjs
 //
-// Optional - a person and a company you KNOW are active on the list (from the Supabase table editor;
-// never commit them):
-//   DNC_KNOWN_EMAIL=...      an email that is an active dnc_registry row (by identity_key or email_lc)
-//   DNC_KNOWN_DOMAIN=...     a domain that is an active dnc_domains row
+// Optional fixtures - real rows you KNOW the state of (from the Supabase table editor; never commit them):
+//   DNC_KNOWN_EMAIL=...        an email that is an ACTIVE dnc_registry row          -> must be BLOCKED
+//   DNC_KNOWN_ROW_REF=...      the id of that row, if you want the row checked too
+//   DNC_KNOWN_DOMAIN=...       a domain that is an ACTIVE dnc_domains row           -> BLOCKED company_dnc
+//   DNC_KNOWN_LINKEDIN=...     the LinkedIn URL of an ACTIVE row keyed by LinkedIn  -> every mangled form
+//                              of it (case, www, slashes, query, fragment, whitespace, an escaped
+//                              character) must resolve to the same row
 // Without them the test proves the function exists, is callable with the Clay key, normalizes
-// exactly like normalize_v1.js and does not block strangers - but it cannot prove it BLOCKS anyone,
-// and it says so instead of passing quietly.
+// exactly like normalize_v1.js and clears strangers - but it cannot prove it BLOCKS anyone, and it
+// says so instead of passing quietly.
 //
 // No dependencies (Node 18+ fetch). Exit 0 = passed, 1 = a check failed, 2 = not configured.
 
@@ -62,8 +65,9 @@ if (probe.status !== 200) {
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(1);
 }
-ok('empty input -> not blocked, identity null', probe.json.blocked === false
-  && probe.json.identity.identity_key === null && probe.json.norm_v === 'v1', JSON.stringify(probe.json));
+ok('empty input -> UNRESOLVABLE, not blocked, identity null', probe.json.gate_result === 'UNRESOLVABLE'
+  && probe.json.blocked === false && probe.json.identity.identity_key === null && probe.json.norm_v === 'v1',
+  JSON.stringify(probe.json));
 
 // ------------------------------------------------------------------ 2. normalization parity, in THIS Postgres
 console.log('2. normalization identical to normalize_v1.js' + (js ? '' : ' (normalize_v1.js not found - using recorded values)'));
@@ -89,35 +93,57 @@ for (const [li, em, want] of cases) {
     `deployed function produced ${JSON.stringify(got)}`);
 }
 
-// ------------------------------------------------------------------ 3. strangers are not blocked
+// ------------------------------------------------------------------ 3. strangers are clean
 console.log('3. an identity that cannot be on the list');
 const nonce = 'zz-dnc-selftest-' + Math.random().toString(36).slice(2, 10);
 const stranger = await rpc({ p_linkedin_url: `https://www.linkedin.com/in/${nonce}`,
   p_email: `${nonce}@${nonce}.invalid` });
-ok('random identity -> blocked false, no persons, no company',
-  stranger.json.blocked === false && stranger.json.persons.length === 0 && stranger.json.company === null,
-  JSON.stringify(stranger.json));
+ok('random identity -> CLEAN, reason null, no persons, no company',
+  stranger.json.gate_result === 'CLEAN' && stranger.json.reason === null && stranger.json.blocked === false
+  && stranger.json.persons.length === 0 && stranger.json.company === null, JSON.stringify(stranger.json));
 
-// ------------------------------------------------------------------ 4. it blocks (needs a known row)
+// ------------------------------------------------------------------ 4. it blocks (needs known rows)
 console.log('4. it blocks');
-const knownEmail = process.env.DNC_KNOWN_EMAIL, knownDomain = process.env.DNC_KNOWN_DOMAIN;
-if (!knownEmail && !knownDomain) {
-  console.log('  [SKIP] DNC_KNOWN_EMAIL / DNC_KNOWN_DOMAIN not set - blocking is UNPROVEN on this run');
+const knownEmail = process.env.DNC_KNOWN_EMAIL, knownRef = process.env.DNC_KNOWN_ROW_REF;
+const knownDomain = process.env.DNC_KNOWN_DOMAIN, knownLi = process.env.DNC_KNOWN_LINKEDIN;
+if (!knownEmail && !knownDomain && !knownLi) {
+  console.log('  [SKIP] no DNC_KNOWN_* fixture set - blocking is UNPROVEN on this run');
 }
+const verdict = (j) => `gate_result=${j.gate_result} reason=${JSON.stringify(j.reason)} ref=${j.registry_row_ref}`;
 if (knownEmail) {
   const r = await rpc({ p_email: knownEmail });
-  ok('known email -> blocked, reason person_active', r.json.blocked === true
-    && r.json.block_reasons.includes('person_active'), `blocked=${r.json.blocked} reasons=${JSON.stringify(r.json.block_reasons)}`);
+  ok('known person by email -> BLOCKED, person_dnc' + (knownRef ? `, row ${knownRef}` : ''),
+    r.json.gate_result === 'BLOCKED' && r.json.block_reasons.includes('person_dnc')
+    && (!knownRef || String(r.json.registry_row_ref) === String(knownRef)), verdict(r.json));
   // THE CORRECTION: the same person seen WITH a LinkedIn URL is still found
   const r2 = await rpc({ p_linkedin_url: `https://www.linkedin.com/in/${nonce}`, p_email: knownEmail });
-  ok('known email + an unrelated LinkedIn URL -> STILL blocked (the fix)', r2.json.blocked === true,
-    `blocked=${r2.json.blocked} - a single identity_key lookup would have missed this person`);
+  ok('known email + an unrelated LinkedIn URL -> STILL BLOCKED (the fix)', r2.json.gate_result === 'BLOCKED',
+    verdict(r2.json) + ' - a single identity_key lookup would have missed this person');
 }
 if (knownDomain) {
   const r = await rpc({ p_email: `${nonce}@${knownDomain}` });
-  ok('anyone at a known company domain -> blocked, reason company_active', r.json.blocked === true
-    && r.json.block_reasons.includes('company_active'), `blocked=${r.json.blocked} reasons=${JSON.stringify(r.json.block_reasons)}`);
+  ok('anyone at a banned company -> BLOCKED, reason company_dnc / <domain>',
+    r.json.gate_result === 'BLOCKED' && r.json.reason === `company_dnc / ${knownDomain.toLowerCase()}`
+    && r.json.block_reasons.includes('company_dnc'), verdict(r.json));
+}
+if (knownLi) {
+  const base = await rpc({ p_linkedin_url: knownLi });
+  ok('known LinkedIn URL -> BLOCKED', base.json.gate_result === 'BLOCKED', verdict(base.json));
+  const slug = base.json.identity.linkedin_slug || '';
+  const mangled = [
+    `  HTTPS://LinkedIn.com/IN/${slug.toUpperCase()}//  `,
+    `https://linkedin.com/in/${slug}/?utm_source=clay&trk=x#about`,
+    `http://www.linkedin.com/in/${slug}/details/experience/`,
+    `linkedin.com/in/${slug}`,
+    `https://www.linkedin.com/in/%${slug.charCodeAt(0).toString(16)}${slug.slice(1)}`,
+  ];
+  for (const m of mangled) {
+    const r = await rpc({ p_linkedin_url: m });
+    ok(`mangled ${JSON.stringify(m.replace(slug.toUpperCase(), '<SLUG>').replace(slug.slice(1), '<slug>'))} -> same row`,
+      r.json.gate_result === 'BLOCKED' && r.json.identity.linkedin_slug === slug
+      && r.json.registry_row_ref === base.json.registry_row_ref, verdict(r.json));
+  }
 }
 
-console.log(`\n${pass} passed, ${fail} failed${!knownEmail && !knownDomain ? ' (blocking not exercised)' : ''}`);
+console.log(`\n${pass} passed, ${fail} failed${!knownEmail && !knownDomain && !knownLi ? ' (blocking not exercised)' : ''}`);
 process.exit(fail ? 1 : 0);

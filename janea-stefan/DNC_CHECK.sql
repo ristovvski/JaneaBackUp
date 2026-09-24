@@ -11,18 +11,33 @@
 -- CONTRACT
 --   select dnc_check(p_linkedin_url => '...', p_email => '...');
 --   POST /rest/v1/rpc/dnc_check  {"p_linkedin_url": "...", "p_email": "..."}
--- Either argument may be null. Returns jsonb:
---   blocked            true if ANY matched person row or the company domain is status = 'active'
---   block_reasons      ["person_active", "company_active"] - which of the two fired
+-- Either argument may be null. Returns jsonb. The VERDICT is the pre-add gate's, field for field
+-- (dnc_pre_add_gate v3, gate_classify_batch_js), so Clay and the gate can never disagree:
+--   gate_result        OWN_TEAM | BLOCKED | UNRESOLVABLE | CLEAN - first match wins, in this order:
+--                        1. email at @janeasystems.com            -> OWN_TEAM (exclude from any list)
+--                        2. email domain is an active dnc_domains -> BLOCKED, 'company_dnc / <domain>'
+--                        3. neither LinkedIn nor email normalizes -> UNRESOLVABLE
+--                        4. an ACTIVE registry row for the person -> BLOCKED, '<entry_type> / <source>'
+--                           (strongest entry_type wins: explicit_opt_out > negative_reply > replied >
+--                           employee_connection > manual; then the oldest added_at)
+--                        otherwise CLEAN ('was <entry_type> until <date>, currently clean' when only
+--                        removed rows exist)
+--   reason             the gate's reason string for that verdict (null for a plain CLEAN)
+--   registry_row_ref   id of the registry row that blocked (person block only)
+--   blocked            gate_result is BLOCKED or OWN_TEAM
+--   block_reasons      EVERY check that fired, not only the winning one: own_team, company_dnc,
+--                      person_dnc
 --   identity           the normalized identity, exactly as normalizeIdentityV1 would compute it
---   domain             the email's domain, lowercased, leading www. stripped
+--   domain             the email's domain, lowercased (the part after '@', as the gate takes it)
 --   persons            every registry row this person could be filed under (by either identity)
 --   company            the dnc_domains row for the domain, or null
 --   norm_v             'v1'
+-- Person matching is a superset of the gate's: identity_key OR the linkedin_url_norm / email_lc
+-- columns, so this can block a row the gate would miss but never clear one the gate would block.
 -- Only status = 'active' blocks. A 'removed' row is reported but does not block (tombstoned, not
 -- deleted). A row that is active but past expires_at is reported with expired_but_active = true and
--- STILL blocks: whether an expired row should stop blocking is a policy decision, and the expiry job
--- that used to flip such rows is currently inactive. This function does not make that decision.
+-- STILL blocks, exactly as in the gate: whether an expired row should stop blocking is a policy
+-- decision, and the expiry job that used to flip such rows is currently inactive.
 --
 -- NORMALIZATION is a port of normalizeIdentityV1 (DNC_OBS_P1_build/subworkflows/lib/normalize_v1.js),
 -- frozen as v1. Four details the prose in NORMALIZATION_RULES.md does not state, taken from the code:
@@ -153,19 +168,21 @@ declare
   dom      text;
   persons  jsonb;
   company  jsonb;
-  p_active boolean;
-  c_active boolean;
+  pick     record;
+  verdict  text;
+  why      text;
+  ref      bigint;
   reasons  jsonb := '[]'::jsonb;
 begin
   select * into id from public.dnc_identity_v1(p_linkedin_url, p_email);
 
   if id.email_lc is not null then
-    dom := substring(id.email_lc from '@([^@]+)$');
-    dom := regexp_replace(dom, '^www\.', '');
+    dom := substr(id.email_lc, strpos(id.email_lc, '@') + 1);     -- as the gate: everything after '@'
   end if;
 
   -- every row this person could be filed under: the slug OR the email, as key or as column
   select coalesce(jsonb_agg(jsonb_build_object(
+           'id', r.id,
            'identity_key', r.identity_key,
            'matched_by', case
                            when id.linkedin_slug is not null and r.identity_key = id.linkedin_slug
@@ -180,6 +197,7 @@ begin
            'status', r.status,
            'reason', r.reason,
            'entry_type', r.entry_type,
+           'source', r.source,
            'reply_category', r.reply_category,
            'added_at', r.added_at,
            'expires_at', r.expires_at,
@@ -202,14 +220,62 @@ begin
      where d.domain = dom;
   end if;
 
-  p_active := exists (select 1 from jsonb_array_elements(persons) x
-                       where x->>'status' = 'active');
-  c_active := coalesce(company->>'status' = 'active', false);
-  if p_active then reasons := reasons || '"person_active"'::jsonb; end if;
-  if c_active then reasons := reasons || '"company_active"'::jsonb; end if;
+  -- the strongest row, ranked exactly like the gate's pick(): active first, then entry_type
+  -- strength, then the OLDEST added_at (the gate compares ISO strings, so a missing date sorts first)
+  select r.id, r.entry_type, r.source, r.status, r.removed_at, r.expires_at
+    into pick
+    from public.dnc_registry r
+   where (id.linkedin_slug is not null
+          and (r.identity_key = id.linkedin_slug or r.linkedin_url_norm = id.linkedin_url_norm))
+      or (id.email_lc is not null
+          and (r.identity_key = id.email_lc or r.email_lc = id.email_lc))
+   order by (r.status = 'active') desc,
+            case r.entry_type when 'explicit_opt_out' then 5 when 'negative_reply' then 4
+                              when 'replied' then 3 when 'employee_connection' then 2
+                              when 'manual' then 1 else 0 end desc,
+            r.added_at asc nulls first
+   limit 1;
+
+  if id.email_lc is not null and right(id.email_lc, 17) = '@janeasystems.com' then
+    reasons := reasons || '"own_team"'::jsonb;
+  end if;
+  if company is not null and company->>'status' = 'active' then
+    reasons := reasons || '"company_dnc"'::jsonb;
+  end if;
+  if pick.status = 'active' then
+    reasons := reasons || '"person_dnc"'::jsonb;
+  end if;
+
+  -- the gate's precedence, first match wins
+  if reasons ? 'own_team' then
+    verdict := 'OWN_TEAM';
+    why := 'own_team ' || chr(8212) || ' exclude from any campaign list';
+  elsif reasons ? 'company_dnc' then
+    verdict := 'BLOCKED';
+    why := 'company_dnc / ' || dom;
+  elsif id.identity_key is null then
+    verdict := 'UNRESOLVABLE';
+    why := 'no LinkedIn URL or email to match on';
+  elsif pick.status = 'active' then
+    verdict := 'BLOCKED';
+    why := pick.entry_type || coalesce(' / ' || nullif(pick.source, ''), '');
+    ref := pick.id;
+  elsif pick.id is not null then
+    verdict := 'CLEAN';
+    why := 'was ' || pick.entry_type || ' until '
+           || coalesce(to_char(pick.removed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+                       to_char(pick.expires_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+                       'unknown')
+           || ', currently clean';
+  else
+    verdict := 'CLEAN';
+  end if;
 
   return jsonb_build_object(
-    'blocked', p_active or c_active,
+    'gate_result', verdict,
+    'reason', why,
+    'registry_row_ref', ref,
+    'blocked', verdict in ('BLOCKED', 'OWN_TEAM'),
     'block_reasons', reasons,
     'identity', jsonb_build_object('identity_key', id.identity_key,
                                    'linkedin_slug', id.linkedin_slug,
@@ -230,5 +296,5 @@ grant execute on function public.dnc_url_decode_v1(text) to anon, authenticated;
 grant execute on function public.dnc_js_trim(text) to anon, authenticated;
 
 comment on function public.dnc_check(text, text) is
-  'May we contact this person? Person (by LinkedIn slug OR email) + company (email domain). '
-  'Only status=active blocks. See DNC_CHECK.sql header for the contract.';
+  'May we contact this person? The pre-add gate verdict (OWN_TEAM / BLOCKED / UNRESOLVABLE / '
+  'CLEAN) for a LinkedIn URL and/or email. Only status=active blocks. See the DNC_CHECK.sql header.';
