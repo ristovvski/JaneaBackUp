@@ -1,0 +1,125 @@
+Clay formula column: facts_json  (table ICP_Engine, column 6)
+==============================================================
+
+GENERATED from engine/schemas/enrichment_facts.schema.json by
+scripts/gen_facts_formula.mjs. Do not hand-edit — regenerate with
+`npm run gen:facts`.
+
+This is the object every one of the seven classifiers reads. Build it BEFORE
+the classifier columns exist: with the enrichment columns still absent it
+emits all-nulls, which is a valid fact set, and the whole pipeline runs
+end to end returning "Insufficient data". See engine/clay_build_order.md,
+Phase 1.
+
+
+STEP 1 — bind the two sources
+-----------------------------
+
+Clay's formula editor inserts its own reference token when you click a column;
+that token is UI syntax and is NOT reproduced here (NEEDS_DOC_EVIDENCE #1 in
+REPORT.md). Replace the two right-hand sides below, then paste STEP 2 unchanged.
+
+  // The webhook source column, whose parsed subfields are already addressable
+  // (verified live 2026-09-15: all 12 keys arrived, Deal Id as null).
+  var W = /* click the "Webhook" source column */ {};
+
+  // The enrichment columns. PHASE 1: leave this exactly as {} — every
+  // enrichment key then resolves to null and the row still scores.
+  // PHASE 2: replace with an object mapping each key below to its column.
+  var E = {};
+
+
+STEP 2 — the body (paste unchanged)
+-----------------------------------
+
+/* ---8<--- BEGIN FACTS BODY (generated; paste unchanged) --- */
+// Generated from engine/schemas/enrichment_facts.schema.json.
+// 24 keys, 23 of them required by the schema.
+//
+// EVERY key is present on EVERY row, with null where enrichment found nothing.
+// That is not tidiness: the classifier preamble tells the model to read null as
+// "enrichment did not find it" and an empty array as "we looked and there was
+// nothing". Omitting a key destroys both readings, and additionalProperties is
+// false, so an extra key fails the row at the n8n boundary.
+
+return {
+    request_id: W['Request Id'] ?? null,                  // string, from the webhook
+    org_id: W['Org Id'] ?? null,                          // string, from the webhook
+    deal_id: W['Deal Id'] ?? null,                        // string, from the webhook   // optional
+    domain: W['Domain'] ?? null,                          // string, from the webhook
+    linkedin_url: E.linkedin_url ?? null,                 // string
+    company_name: E.company_name ?? null,                 // string
+    hq_country: E.hq_country ?? null,                     // string
+    hq_state: E.hq_state ?? null,                         // string
+    li_headcount: E.li_headcount ?? null,                 // integer
+    li_industry: E.li_industry ?? null,                   // string
+    li_description: E.li_description ?? null,             // string
+    li_founded: E.li_founded ?? null,                     // integer
+    li_hq: E.li_hq ?? null,                               // string
+    website_summary: E.website_summary ?? null,           // string
+    revenue_estimate_usd: E.revenue_estimate_usd ?? null, // number
+    revenue_source: E.revenue_source ?? null,             // string
+    funding_stage: E.funding_stage ?? null,               // string
+    last_round_date: E.last_round_date ?? null,           // string
+    last_round_usd: E.last_round_usd ?? null,             // number
+    open_eng_roles_count: E.open_eng_roles_count ?? null, // integer
+    eng_roles_open_60d_plus: E.eng_roles_open_60d_plus ?? null,// integer
+    senior_eng_roles: E.senior_eng_roles ?? null,         // integer
+    eng_headcount_estimate: E.eng_headcount_estimate ?? null,// integer
+    news_last_12mo: E.news_last_12mo ?? null,             // array
+};
+/* ---8<--- END FACTS BODY --- */
+
+
+WHAT PHASE 1 PRODUCES
+---------------------
+
+With `E = {}`, `facts_json` is well-formed and every enrichment value is null.
+Downstream:
+
+  - the seven classifiers (once they exist) return value: null,
+    confidence: "low", and list their missing_inputs;
+  - `score_json` returns status "insufficient_data", grade null — because
+    stage_maturity, revenue_range and company_type all gate it;
+  - n8n writes ICP Calculated = "Insufficient data" plus a note whose
+    Missing line names every absent fact.
+
+That is the full loop working, honestly reporting that it has nothing to score
+on. It is the correct behaviour, not a failure — and it is provable today
+without spending an enrichment credit.
+
+To turn it into a real grade for a demo, hand-type a few values into one row
+(revenue_estimate_usd, funding_stage, li_headcount, eng_roles_open_60d_plus)
+and the identical formula produces a genuine graded result.
+
+
+KEYS, AND WHERE EACH COMES FROM
+-------------------------------
+
+From the webhook (4):
+  request_id               <- Webhook."Request Id"
+  org_id                   <- Webhook."Org Id"
+  deal_id                  <- Webhook."Deal Id"
+  domain                   <- Webhook."Domain"
+
+From enrichment (20) — Phase 2:
+  linkedin_url
+  company_name
+  hq_country
+  hq_state
+  li_headcount
+  li_industry
+  li_description
+  li_founded
+  li_hq
+  website_summary
+  revenue_estimate_usd
+  revenue_source
+  funding_stage
+  last_round_date
+  last_round_usd
+  open_eng_roles_count
+  eng_roles_open_60d_plus
+  senior_eng_roles
+  eng_headcount_estimate
+  news_last_12mo

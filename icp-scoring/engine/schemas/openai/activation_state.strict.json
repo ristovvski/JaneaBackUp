@@ -1,0 +1,73 @@
+{
+  "name": "icp_v5_activation_state",
+  "strict": true,
+  "schema": {
+    "type": "object",
+    "required": [
+      "component",
+      "value",
+      "evidence",
+      "confidence",
+      "missing_inputs",
+      "evidence_dated_within_months"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "component": {
+        "enum": [
+          "activation_state"
+        ],
+        "description": "The component this object classifies. Exactly this value."
+      },
+      "value": {
+        "anyOf": [
+          {
+            "enum": [
+              "Accelerating",
+              "Transitioning",
+              "Stable",
+              "Contracting"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The activation_state value: one of [\"Accelerating\",\"Transitioning\",\"Stable\",\"Contracting\"], or null when the facts do not support a defensible answer."
+      },
+      "evidence": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "At most 6 items, each \"<fact_key>: <value>\" and under 200 characters. The limits are not expressible in strict mode; they are still the contract."
+      },
+      "confidence": {
+        "enum": [
+          "high",
+          "medium",
+          "low"
+        ],
+        "description": "high when a fact states it or two agree; medium when inferred; low when extrapolating."
+      },
+      "missing_inputs": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Fact keys you needed and did not get. Empty array when none."
+      },
+      "evidence_dated_within_months": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Required when value is \"Contracting\": the age in months of the dated evidence item, which must be within 12 months. Null otherwise."
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "request_id": "req-icp-0001",
+  "org_id": 10001,
+  "deal_id": 55001,
+  "requested_at": "2026-09-18T10:42:00Z",
+  "final": 93,
+  "grade": "A",
+  "status": "scored",
+  "note": "ICP v6 — Calculated: ICP A (93/100) · Confidence: high\nIndustry 10/10 · FinTech — Lending decisioning sold to credit unions.\nStage 7/10 — Four engineering roles open past 60 days.\nType 10/10 — Named cloud products and a 50-person engineering team.\nGeo 10/10 — Headquarters in Colorado, inside the primary US market.\nRevenue 7/10 · $10M–$25M via apollo — Apollo estimates $18M.\nActivation Accelerating ×1.00 — Headcount up 22% over six months.\nComposite 92.5 × 1.00 = 93 → ICP A",
+  "composite": 92.5,
+  "multiplier": 1,
+  "final_without_activation": 92.5,
+  "industry_level": 10,
+  "stage_level": 7,
+  "type_level": 10,
+  "geo_level": 10,
+  "revenue_level": 7,
+  "activation_used": "Accelerating",
+  "confidence_overall": "high",
+  "tier2_candidate": false,
+  "flags": []
+}

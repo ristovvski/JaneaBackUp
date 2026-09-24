@@ -1,0 +1,24 @@
+{
+  "request_id": "req-icp-0004",
+  "org_id": 10004,
+  "deal_id": null,
+  "requested_at": "2026-09-18T10:42:00Z",
+  "final": null,
+  "grade": null,
+  "status": "insufficient_data",
+  "note": "ICP v6 — Not calculated: insufficient data\nStage, revenue and company type could not be established from the available enrichment, so no grade was produced.",
+  "composite": null,
+  "multiplier": null,
+  "final_without_activation": null,
+  "industry_level": null,
+  "stage_level": null,
+  "type_level": null,
+  "geo_level": 10,
+  "revenue_level": null,
+  "activation_used": null,
+  "confidence_overall": "low",
+  "tier2_candidate": false,
+  "flags": [
+    "insufficient_data"
+  ]
+}

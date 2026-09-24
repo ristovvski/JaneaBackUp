@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://janeasystems.com/icp/icp_scored_event.schema.json",
+  "title": "icp.scored event (v6.2 — the table scores)",
+  "description": "One event per row, posted by the Clay ICP table to n8n Path B. It carries THE SCORE: the table classifies, enriches AND grades, and n8n writes. Eight required keys are what a write cannot happen without; twelve optional keys are the working, carried into the run summary and never into a decision. additionalProperties is false over exactly those twenty — a column the table starts sending that this list does not name is a contract change, and a contract change should be loud.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id", "org_id", "deal_id", "requested_at",
+    "final", "grade", "status", "note"
+  ],
+  "properties": {
+    "request_id": { "type": "string", "minLength": 1, "description": "the n8n correlation id issued on Path A; the Path B dedupe key, on its own" },
+    "org_id":     { "type": "integer", "minimum": 1, "description": "numeric, as Pipedrive has it and as Path A sent it — it becomes a URL path segment on the PATCH" },
+    "deal_id":    { "type": ["integer", "null"], "description": "present always; null is legal, because a re-score can happen outside a deal" },
+    "requested_at": { "type": "string", "minLength": 10, "description": "when Path A asked" },
+
+    "final":  { "type": ["integer", "null"], "minimum": 0, "maximum": 100, "description": "the grade's number. Written as \"<final> - <grade>\"." },
+    "grade":  { "oneOf": [{ "enum": ["A", "B", "C"] }, { "type": "null" }] },
+    "status": { "enum": ["scored", "insufficient_data"], "description": "\"scored\" REQUIRES a non-null final and grade; otherwise the organization would be given a grade-shaped blank" },
+    "note":   { "type": "string", "minLength": 1, "description": "the table's own note, written to the Pipedrive activity VERBATIM. n8n renders nothing: there is one author of what a rep reads, and it is the table." },
+
+    "composite":                { "type": ["number", "null"] },
+    "multiplier":               { "type": ["number", "null"] },
+    "final_without_activation": { "type": ["number", "null"] },
+
+    "industry_level": { "$ref": "#/definitions/level" },
+    "stage_level":    { "$ref": "#/definitions/level" },
+    "type_level":     { "$ref": "#/definitions/level" },
+    "geo_level":      { "$ref": "#/definitions/level" },
+    "revenue_level":  { "$ref": "#/definitions/level" },
+
+    "activation_used":    { "oneOf": [{ "enum": ["Accelerating", "Transitioning", "Stable", "Contracting"] }, { "type": "null" }] },
+    "confidence_overall": { "oneOf": [{ "enum": ["high", "medium", "low"] }, { "type": "null" }] },
+    "tier2_candidate":    { "type": ["boolean", "null"] },
+    "flags":              { "type": ["array", "null"], "items": { "type": "string" } }
+  },
+
+  "definitions": {
+    "level": { "oneOf": [{ "enum": [0, 3, 7, 10] }, { "type": "null" }] }
+  }
+}

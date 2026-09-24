@@ -1,0 +1,97 @@
+{
+  "SYNTHETIC": true,
+  "captured_at": null,
+  "request_id": "synthetic-microsoft",
+  "org_id": "10002",
+  "deal_id": null,
+  "domain": "microsoft.com",
+  "linkedin_url": "https://www.linkedin.com/company/microsoft",
+  "company_name": "Microsoft",
+  "hq_country": "United States",
+  "hq_state": "Washington",
+  "li_headcount": 228000,
+  "li_industry": "Software Development",
+  "li_description": "Technology company producing computer software, consumer electronics, personal computers and cloud services.",
+  "li_founded": 1975,
+  "li_hq": "Redmond, Washington, United States",
+  "website_summary": "Azure, Microsoft 365, Dynamics, Windows, gaming and devices. Careers pages list tens of thousands of engineering roles filled internally across dozens of countries. No indication of engineering capacity being sourced externally.",
+  "revenue_estimate_usd": 245000000000,
+  "revenue_source": "Apollo",
+  "funding_stage": "Public",
+  "last_round_date": null,
+  "last_round_usd": null,
+  "open_eng_roles_count": 4200,
+  "eng_roles_open_60d_plus": 900,
+  "senior_eng_roles": 700,
+  "eng_headcount_estimate": 90000,
+  "news_last_12mo": [
+    {
+      "date": "2026-05-20",
+      "headline": "Microsoft expands datacentre capacity for AI workloads",
+      "source": "Reuters",
+      "url": null
+    }
+  ],
+  "synthetic_classifier_output": {
+    "industry_vertical": {
+      "value": "Enterprise Tech / Hyperscalers",
+      "evidence": [
+        "li_industry: Software Development",
+        "website_summary: Azure, Microsoft 365, Dynamics, Windows, gaming and devices"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "stage_maturity": {
+      "value": 0,
+      "evidence": [
+        "eng_headcount_estimate: 90000",
+        "website_summary: engineering roles filled internally … no indication of engineering capacity being sourced externally"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "company_type": {
+      "value": 10,
+      "evidence": [
+        "li_description: computer software … and cloud services"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "geography": {
+      "value": 10,
+      "evidence": [
+        "hq_country: United States",
+        "hq_state: Washington"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "revenue_range": {
+      "value": 0,
+      "evidence": [
+        "revenue_estimate_usd: 245000000000",
+        "revenue_source: Apollo"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "activation_state": {
+      "value": "Stable",
+      "evidence": [
+        "news_last_12mo: 1 item, capacity expansion, not a transformation"
+      ],
+      "confidence": "high",
+      "missing_inputs": []
+    },
+    "buying_signal": {
+      "value": 3,
+      "evidence": [
+        "open_eng_roles_count: 4200 — volume, not a targeted cluster"
+      ],
+      "confidence": "low",
+      "missing_inputs": []
+    }
+  }
+}

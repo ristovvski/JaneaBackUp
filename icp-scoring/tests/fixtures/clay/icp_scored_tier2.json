@@ -1,0 +1,24 @@
+{
+  "request_id": "req-icp-0006",
+  "org_id": 10006,
+  "deal_id": 55006,
+  "requested_at": "2026-09-18T10:42:00Z",
+  "final": 30,
+  "grade": "C",
+  "status": "scored",
+  "note": "ICP v6 — Calculated: ICP C (30/100) · Confidence: low\nFlagged as a Tier 2 candidate: enterprise scale, different motion.",
+  "composite": 38,
+  "multiplier": 0.8,
+  "final_without_activation": 38,
+  "industry_level": 3,
+  "stage_level": 0,
+  "type_level": 3,
+  "geo_level": 10,
+  "revenue_level": 0,
+  "activation_used": "Stable",
+  "confidence_overall": "low",
+  "tier2_candidate": true,
+  "flags": [
+    "tier2_candidate"
+  ]
+}

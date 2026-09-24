@@ -1,0 +1,22 @@
+{
+  "request_id": "req-icp-0002",
+  "org_id": 10002,
+  "deal_id": 55002,
+  "requested_at": "2026-09-18T10:42:00Z",
+  "final": 74,
+  "grade": "B",
+  "status": "scored",
+  "note": "ICP v6 — Calculated: ICP B (74/100) · Confidence: high\nComposite 92.5 × 0.80 = 74 → ICP B\nActivation Stable ×0.80 — No evidence of a current transformation.",
+  "composite": 92.5,
+  "multiplier": 0.8,
+  "final_without_activation": 92.5,
+  "industry_level": 10,
+  "stage_level": 7,
+  "type_level": 10,
+  "geo_level": 10,
+  "revenue_level": 7,
+  "activation_used": "Stable",
+  "confidence_overall": "high",
+  "tier2_candidate": false,
+  "flags": []
+}

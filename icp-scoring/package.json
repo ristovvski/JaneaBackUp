@@ -1,0 +1,43 @@
+{
+  "name": "icp-scoring",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Janea ICP v5 auto-scoring: deterministic engine, classifier prompts, Pipedrive/Clay/n8n wiring (Phase 1)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test \"tests/unit/*.test.mjs\" \"tests/contract/*.test.mjs\" \"tests/static/*.test.mjs\" \"tests/golden/*.test.mjs\"",
+    "test:unit": "node --test \"tests/unit/*.test.mjs\"",
+    "test:contract": "node --test \"tests/contract/*.test.mjs\"",
+    "test:static": "node --test \"tests/static/*.test.mjs\"",
+    "test:golden": "node --test \"tests/golden/*.test.mjs\"",
+    "live": "node tests/live/dev_e2e.mjs",
+    "gen:formula": "node scripts/gen_clay_formula.mjs",
+    "gen:config": "node scripts/gen_config_node.mjs",
+    "audit:coverage": "node scripts/pipedrive_audit_coverage.mjs",
+    "pipedrive:fields": "node scripts/pipedrive_create_fields.mjs",
+    "pipedrive:webhook": "node scripts/pipedrive_register_webhook.mjs",
+    "golden:export": "node scripts/export_golden_set.mjs",
+    "patch": "node n8n/patch/patch.mjs",
+    "gen:prompts": "node scripts/gen_prompts.mjs",
+    "check:nodes": "node scripts/check_nodes.mjs",
+    "gen:nodes": "node scripts/gen_nodes.mjs",
+    "proof": "node scripts/discriminating_proof.mjs --write",
+    "pretest": "node n8n/patch/patch.mjs",
+    "scan:secrets": "node scripts/scan_secrets.mjs",
+    "scan:history": "node scripts/scan_secrets.mjs --history",
+    "posttest": "node scripts/scan_secrets.mjs --tracked",
+    "gen:facts": "node scripts/gen_facts_formula.mjs",
+    "gen:python": "node scripts/gen_clay_python.mjs",
+    "gen:openai": "node scripts/gen_openai_schemas.mjs",
+    "clay:build": "node clay/build_workflow.mjs",
+    "clay:export": "node clay/export_run.mjs",
+    "gen:fixtures": "node scripts/gen_fixtures.mjs"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
+  }
+}

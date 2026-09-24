@@ -1,0 +1,41 @@
+{
+  "_fixture": "deal_added.replay",
+  "_source": "Byte-identical redelivery of deal_added.v2 \u2014 same meta.id, attempt incremented. Pipedrive retries on a non-2xx, so this is the real duplicate the Dedupe ledger has to swallow. The dedupe key must NOT include attempt.",
+  "meta": {
+    "action": "create",
+    "entity": "deal",
+    "entity_id": "55001",
+    "id": "evt-2026-09-09-000111",
+    "company_id": "1234567",
+    "user_id": "12914044",
+    "webhook_id": "9001",
+    "webhook_owner_id": "12914044",
+    "correlation_id": "b7f2c1a0-1e2d-4c3b-9a8f-0d1e2f3a4b5c",
+    "attempt": 2,
+    "host": "janeasystems.pipedrive.com",
+    "timestamp": "2026-09-09T10:15:07.980Z",
+    "type": "general",
+    "version": "2.0",
+    "change_source": "app",
+    "is_bulk_edit": false,
+    "permitted_user_ids": [
+      12914044
+    ]
+  },
+  "data": {
+    "id": 55001,
+    "title": "Akuvo \u2014 inbound",
+    "value": 0,
+    "currency": "USD",
+    "org_id": 10001,
+    "person_id": 77001,
+    "stage_id": 3,
+    "pipeline_id": 1,
+    "status": "open",
+    "owner_id": 12914044,
+    "add_time": "2026-09-09T10:14:52Z",
+    "update_time": "2026-09-09T10:14:52Z",
+    "custom_fields": {}
+  },
+  "previous": null
+}

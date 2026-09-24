@@ -1,0 +1,96 @@
+{
+  "request_id": "req-clay-wf-akuvo-001",
+  "org_id": "TEST-AKUVO",
+  "deal_id": null,
+  "identifier_kind": "domain",
+  "identifier_value": "akuvo.com",
+  "domain": "akuvo.com",
+  "linkedin_url": null,
+  "company_name": "Akuvo",
+  "hq_country": "United States",
+  "hq_state": "Colorado",
+  "li_headcount": 92,
+  "li_industry": "Software Development",
+  "li_description": "AKUVO is a leading provider of cloud-native software that elevates how financial institutions collect and manage their portfolios via its collections platform. It provides the technology and data necessary to increase collections efficiency, reduce staff costs, anticipate delinquencies, and provide insight into future credit decisions. AKUVO is defining the future of collections and account performance management with a visionary, behavior-based approach while taking full advantage of emerging technologies such as artificial intelligence, natural language processing, and machine learning. To learn more, visit www.akuvo.com.",
+  "li_founded": 2019,
+  "li_hq": "Malvern, Pennsylvania, US",
+  "website_summary": "Akuvo describes its offering as an “AI-driven collections platform” that “enhances efficiency and resolves accounts faster” for banks and credit unions. The page text identifies the product as a platform; it does not explicitly state whether it is software or supports a non-software product.\n\nThe company sells to banks and credit unions. The homepage states that Akuvo announced 16 new customers, but does not provide customer-size criteria or segments.\n\nOn the careers page, Akuvo invites candidates to explore open positions and says it is “creating the future at AKUVO.” It does not mention engineering-specific hiring, engineering team growth, headcount plans, or capacity expansion.\n\nThe reachable pages were the homepage and `/careers`. The `/product` page was not reachable, so no roadmap, platform-rebuild, or re-platforming language was available.\n\nPages reachable: homepage, /careers",
+  "revenue_estimate_usd": 75000000,
+  "revenue_source": "Firmographic enrichment (inferred) (band \"$50M-$100M\"); company profile lookup disagrees (band \"10M-25M\")",
+  "funding_stage": "private_equity",
+  "last_round_date": "2025-09-18",
+  "last_round_usd": null,
+  "open_eng_roles_count": 0,
+  "eng_roles_open_60d_plus": 0,
+  "senior_eng_roles": 0,
+  "eng_headcount_estimate": 18,
+  "news_last_12mo": [
+    {
+      "url": "https://www.finopotamus.com/post/akuvo-extends-collections-lifecycle-management-with-launch-of-akuvo-recovery",
+      "date": "2026-09-14",
+      "source": "launches",
+      "headline": "AKUVO extends collections lifecycle management with launch of AKUVO Recovery."
+    },
+    {
+      "url": "https://thecreditunionconnection.com/akuvo-taps-two-homegrown-leaders-for-the-c-suite",
+      "date": "2026-09-11",
+      "source": "hires",
+      "headline": "AKUVO taps two homegrown leaders for the c-suite."
+    },
+    {
+      "url": "https://www.cuinsight.com/press-release/akuvo-strengthens-executive-team-with-promotions-of-melissa-bachman-and-mike-ruggiero",
+      "date": "2026-09-11",
+      "source": "promotes",
+      "headline": "AKUVO strengthens executive team with promotions of Melissa Bachman and Mike Ruggiero."
+    },
+    {
+      "url": "https://www.cuinsight.com/press-release/akuvo-strengthens-executive-team-with-promotions-of-melissa-bachman-and-mike-ruggiero",
+      "date": "2026-09-11",
+      "source": "promotes",
+      "headline": "AKUVO strengthens executive team with promotions of Melissa Bachman and Mike Ruggiero."
+    },
+    {
+      "url": "https://ffnews.com/news/akuvo-strengthens-executive-team-7fa406a3",
+      "date": "2026-09-11",
+      "source": "hires",
+      "headline": "AKUVO elevates Melissa Bachman and Mike Ruggiero to key executive leadership roles."
+    },
+    {
+      "url": "https://www.prnewswire.com/news-releases/dcm-services-adds-akuvo-as-strategic-partner-to-expand-proactive-estate-recovery-for-credit-unions-302875954.html",
+      "date": "2026-09-11",
+      "source": "partners_with",
+      "headline": "DCM Services adds AKUVO as strategic partner to expand proactive estate recovery for credit unions."
+    },
+    {
+      "url": "https://www.cuinsight.com/press-release/60-billion-state-employees-credit-union-chooses-akuvo-to-streamline-collections-operations",
+      "date": "2026-09-09",
+      "source": "signs_new_client",
+      "headline": "$60 billion State Employees' Credit Union chooses AKUVO to streamline collections operations."
+    },
+    {
+      "url": "https://ffnews.com/news/akuvo-announces-new-predictive-intelligence-models-f98e7e0a",
+      "date": "2026-09-03",
+      "source": "launches",
+      "headline": "AKUVO launches predictive intelligence models to transform collections strategy for lenders."
+    },
+    {
+      "url": "https://www.cocc.com/cocc-and-akuvo",
+      "date": "2026-07-21",
+      "source": "partners_with",
+      "headline": "COCC and AKUVO Advance the Future of Intelligent Collections."
+    },
+    {
+      "url": "https://www.finopotamus.com/post/akuvo-announces-akuvo-iq-a-new-portfolio-intelligence-solution",
+      "date": "2026-06-15",
+      "source": "launches",
+      "headline": "AKUVO announces AKUVO IQ, a new portfolio intelligence solution."
+    },
+    {
+      "url": "https://ffnews.com/news/akuvo-announces-new-predictive-intelligence-models-f98e7e0a",
+      "date": "2026-02-01",
+      "source": "partners_with",
+      "headline": "AKUVO launches predictive intelligence models to transform collections strategy for lenders."
+    }
+  ],
+  "captured_at": "2026-09-15T13:52:01Z"
+}

@@ -1,0 +1,157 @@
+{
+  "_generated_by": "scripts/gen_config_node.mjs",
+  "_sources": [
+    "config/rubric_v6.json",
+    "config/pipedrive_fields.json"
+  ],
+  "_field_registry_status": "placeholder",
+  "model_version": "v6",
+  "levels": [
+    0,
+    3,
+    7,
+    10
+  ],
+  "weights": {
+    "industries": 15,
+    "stage_maturity": 25,
+    "revenue_range": 25,
+    "company_type": 25,
+    "geography": 10,
+    "buying_signal": 0
+  },
+  "thresholds": {
+    "A": 75,
+    "B": 55
+  },
+  "grade_labels": {
+    "A": "ICP A",
+    "B": "ICP B",
+    "C": "ICP C"
+  },
+  "activation_multipliers": {
+    "Accelerating": 1,
+    "Transitioning": 0.95,
+    "Stable": 0.8,
+    "Contracting": 0
+  },
+  "activation_default": "Stable",
+  "contracting_max_age_months": 12,
+  "insufficient_components": [
+    "stage_maturity",
+    "revenue_range",
+    "company_type"
+  ],
+  "tier2_rule": {
+    "revenue_usd_gt": 500000000,
+    "headcount_gt": 1000,
+    "company_type_level_eq": 7
+  },
+  "component_scales": {
+    "stage_maturity": {
+      "0": "Pre-product, no funded engineering org, OR fully self-sufficient enterprise",
+      "3": "Pre-Series B with engineering still consolidating; OR mature steady-state without acute pressure",
+      "7": "Series A or mature steady-state with documented capacity gaps",
+      "10": "Series B–D growth, limited internal capacity, active investment + roadmap commitments"
+    },
+    "company_type": {
+      "0": "Pure hardware OR IT-led (no engineering org owning product software)",
+      "3": "Software-integrated / embedded device companies (hardware-led with significant software layer)",
+      "7": "Software-Dependent — mission-critical custom software as core function (e.g., Merck, regulated industries)",
+      "10": "Software-native (SaaS, data platform, software-as-core-product)"
+    },
+    "geography": {
+      "0": "Non-network, non-English-speaking, or jurisdictionally hard market",
+      "3": "English-speaking market outside network reach (AU, NZ, Singapore, UK)",
+      "7": "Canada + Western Europe",
+      "10": "US-based"
+    },
+    "revenue_range": {
+      "0": "Pre-revenue OR enterprise > $1B (Tier 2 territory)",
+      "3": "Under $10M OR over $500M (different motion required)",
+      "7": "$10M–$25M (workable but less buyer infrastructure)",
+      "10": "$25M–$500M (defined CFO/CRO/CIO, budget calendars, established procurement)"
+    },
+    "activation_state": {
+      "Accelerating": "Raising capital, scaling team, public roadmap commitments, new capability hires",
+      "Transitioning": "Re-platforming, post-funding inflection, new CTO/VP Eng, restructuring engineering",
+      "Stable": "Steady-state, no acute transformation pressure",
+      "Contracting": "Layoffs, hiring freeze, cost-cutting, declining metrics — requires dated evidence ≤ 12 months"
+    },
+    "buying_signal": {
+      "0": "No detectable buying signal in the current window",
+      "3": "Weak / single-source signal (one posting, generic engineering hire)",
+      "7": "Single strong signal: high-quality posting cluster, recent funding, or named champion connection",
+      "10": "Compound signal: concentrated postings (Head of X + 5+ roles) AND funding event OR exec change AND tech-stack investment"
+    }
+  },
+  "vertical_tier": {
+    "FinTech": "Anchor",
+    "HealthTech / MedTech": "Anchor",
+    "SportsTech": "Watch",
+    "Analytics / ML": "Watch",
+    "Data Platform SaaS": "Watch",
+    "SaaS — Other": "Watch",
+    "Manufacturing tech / Industrial IoT": "Opportunistic",
+    "Enterprise Tech / Hyperscalers": "Anchor",
+    "Pharma / Life Sciences": "Watch",
+    "EdTech": "Out",
+    "LegalTech": "Out",
+    "ClimaTech": "Opportunistic",
+    "Government / Public Sector": "Out",
+    "Pure Hardware / Consumer Electronics": "Out",
+    "Telecom / 5G Infrastructure": "Out",
+    "E-commerce / Retail Tech": "Out",
+    "Pre-product Startups": "Out"
+  },
+  "vertical_level": {
+    "FinTech": 10,
+    "HealthTech / MedTech": 10,
+    "SportsTech": 7,
+    "Analytics / ML": 7,
+    "Data Platform SaaS": 7,
+    "SaaS — Other": 7,
+    "Manufacturing tech / Industrial IoT": 3,
+    "Enterprise Tech / Hyperscalers": 10,
+    "Pharma / Life Sciences": 7,
+    "EdTech": 0,
+    "LegalTech": 0,
+    "ClimaTech": 3,
+    "Government / Public Sector": 0,
+    "Pure Hardware / Consumer Electronics": 0,
+    "Telecom / 5G Infrastructure": 0,
+    "E-commerce / Retail Tech": 0,
+    "Pre-product Startups": 0
+  },
+  "f_auto_icp_score": "PLACEHOLDER_auto_icp_score_0000000000000000000000000000000000",
+  "f_auto_icp_scored_at": "PLACEHOLDER_auto_icp_scored_at_000000000000000",
+  "f_sales_rep_icp_score": "PLACEHOLDER_sales_rep_icp_score_00000000000000000000000000000",
+  "fields_never_write": [
+    "PLACEHOLDER_sales_rep_icp_score_00000000000000000000000000000",
+    "PLACEHOLDER_website_url_00000000000000000000"
+  ],
+  "f_website_url": "PLACEHOLDER_website_url_00000000000000000000",
+  "fields_written": [
+    "PLACEHOLDER_auto_icp_score_0000000000000000000000000000000000",
+    "PLACEHOLDER_auto_icp_scored_at_000000000000000"
+  ],
+  "auto_score_separator": " - ",
+  "label_insufficient": "n/a - insufficient data",
+  "label_error": "n/a - error",
+  "label_no_website": "n/a - no website",
+  "activity_type": "task",
+  "activity_subject": "ICP scored",
+  "activity_max_chars": 900,
+  "activity_subject_skipped": "ICP not scored",
+  "activity_subject_failed": "ICP scoring failed",
+  "activity_no_website": "Skipped: organization has no Website URL — fill it and re-create the deal or re-run",
+  "rescore_after_days": 180,
+  "model_effective_date": "2026-09-17",
+  "rescore_on_error_or_insufficient": true,
+  "dedupe_ttl_hours": 48,
+  "max_events_per_hour": 200,
+  "note_max_chars": 1500,
+  "trigger_entity": "deal",
+  "trigger_action": "create",
+  "clay_event_name": "icp.scored"
+}

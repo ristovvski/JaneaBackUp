@@ -1,0 +1,49 @@
+{
+  "_comment": "Written by scripts/pipedrive_create_fields.mjs. Three fields written or reserved, plus one READ-ONLY entry (website_url) that this repo never creates and never writes: the workflow writes Auto-ICP Score and Auto-ICP Scored At together in one PATCH, and never touches Sales Rep ICP Score, which belongs to the human. The five v5 fields (ICP Calculated, ICP Score, ICP Scored At, ICP Model Version, ICP Final) were deleted from the account on 2026-09-17. status=placeholder means the script has NOT been run against a real account yet: the `key` values are deterministic stand-ins so CONFIG, the fixtures and the static tests are wired up and testable offline.",
+  "status": "placeholder",
+  "generated_at": null,
+  "account": null,
+  "model_version": "v6",
+  "fields": {
+    "auto_icp_score": {
+      "name": "Auto-ICP Score",
+      "field_type": "varchar",
+      "purpose": "The ONLY organization field this workflow writes. Text, formatted \"<final> - <grade>\", e.g. \"56 - B\"; \"n/a - insufficient data\" when the score could not be produced. Text rather than a number and an enum because it is one human-readable fact, and two fields that can disagree about the same run is a worse shape than one that cannot.",
+      "key": "PLACEHOLDER_auto_icp_score_0000000000000000000000000000000000",
+      "id": null
+    },
+    "sales_rep_icp_score": {
+      "name": "Sales Rep ICP Score",
+      "field_type": "varchar",
+      "purpose": "The human's field. Created by this repo so it exists next to the automatic one, and NEVER written to \u2014 asserted in BuildOrgPatch and in the static suite, not merely omitted.",
+      "key": "PLACEHOLDER_sales_rep_icp_score_00000000000000000000000000000",
+      "id": null
+    },
+    "auto_icp_scored_at": {
+      "name": "Auto-ICP Scored At",
+      "field_type": "date",
+      "purpose": "The date half of the idempotency pair, written in the same PATCH as Auto-ICP Score. It is what makes a re-score possible without a table: the gate reads it for age and for whether the org was scored under the current rubric.",
+      "key": "PLACEHOLDER_auto_icp_scored_at_000000000000000",
+      "id": null
+    },
+    "website_url": {
+      "name": "Website URL",
+      "field_type": "varchar",
+      "read_only": true,
+      "purpose": "READ ONLY, and never created by this repo: it already existed in the account. The ruling says the organization's Website URL is the one identifier; in THIS account that name belongs to a custom field, while Pipedrive's own standard field (key `website`) is labelled plain \"Website\". Reps have filled the custom one far more: across 21,806 organizations on 2026-09-17, 76 had only the standard field, 898 had only this one, 958 had both. Reading the standard field alone would skip 898 organizations that do have a website on file, so IdempotencyGate reads the standard field first and falls back to this. It is never written.",
+      "key": "PLACEHOLDER_website_url_00000000000000000000",
+      "id": null
+    }
+  },
+  "expected_field_count": 3,
+  "written_by_workflow": [
+    "auto_icp_score",
+    "auto_icp_scored_at"
+  ],
+  "fields_never_write": [
+    "sales_rep_icp_score"
+  ],
+  "read_only_fields": [
+    "website_url"
+  ]
+}

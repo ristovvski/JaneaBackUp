@@ -1,0 +1,61 @@
+{
+  "name": "icp_v5_company_type",
+  "strict": true,
+  "schema": {
+    "type": "object",
+    "required": [
+      "component",
+      "value",
+      "evidence",
+      "confidence",
+      "missing_inputs"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "component": {
+        "enum": [
+          "company_type"
+        ],
+        "description": "The component this object classifies. Exactly this value."
+      },
+      "value": {
+        "anyOf": [
+          {
+            "enum": [
+              0,
+              3,
+              7,
+              10
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The company_type value: one of [0,3,7,10], or null when the facts do not support a defensible answer."
+      },
+      "evidence": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "At most 6 items, each \"<fact_key>: <value>\" and under 200 characters. The limits are not expressible in strict mode; they are still the contract."
+      },
+      "confidence": {
+        "enum": [
+          "high",
+          "medium",
+          "low"
+        ],
+        "description": "high when a fact states it or two agree; medium when inferred; low when extrapolating."
+      },
+      "missing_inputs": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Fact keys you needed and did not get. Empty array when none."
+      }
+    }
+  }
+}

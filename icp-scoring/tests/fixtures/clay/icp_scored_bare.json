@@ -1,0 +1,10 @@
+{
+  "request_id": "req-icp-0005",
+  "org_id": 10005,
+  "deal_id": 55005,
+  "requested_at": "2026-09-18T10:42:00Z",
+  "final": 56,
+  "grade": "B",
+  "status": "scored",
+  "note": "ICP v6 — Calculated: ICP B (56/100)\nNo working was sent with this row."
+}

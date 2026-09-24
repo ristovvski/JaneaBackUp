@@ -1,0 +1,457 @@
+# RUNBOOK — WF-ICP-Score
+
+Operate, debug, roll back. Written for whoever is on call, not for whoever
+built it.
+
+---
+
+## Table of contents
+
+- [First-time setup](#first-time-setup)
+- [Slack alert glossary](#slack-alert-glossary)
+- [Debugging: start here](#debugging-start-here)
+- [Symptom → cause](#symptom--cause)
+- [Changing a scoring number](#changing-a-scoring-number)
+- [Rolling back](#rolling-back)
+- [Turning it off](#turning-it-off)
+- [What this workflow will never do](#what-this-workflow-will-never-do)
+
+---
+
+## First-time setup
+
+In this order. Steps 1–3 are read-only or idempotent; nothing before step 5
+sends a single deal through.
+
+### Supplying credentials
+
+Every script reads its credentials from the **environment** — never from a file
+in this repo, never from a command-line argument (which would land in your
+shell history), never from a URL.
+
+If you keep a local `.env`, Node reads it natively; no wrapper and no code
+change:
+
+```bash
+node --env-file=/path/to/.env scripts/pipedrive_create_fields.mjs --dry-run
+node --env-file=/path/to/.env scripts/pipedrive_audit_coverage.mjs
+node --env-file=/path/to/.env tests/live/dev_e2e.mjs
+```
+
+`.env` is in `.gitignore`. Keep it there.
+
+> **Least privilege.** This build needs exactly two secrets:
+> `PIPEDRIVE_API_TOKEN` and, for the DEV import and the live suite,
+> `N8N_API_KEY` (+ `N8N_BASE_URL`). It never touches Smartlead, HeyReach,
+> Make or OpenAI. If your `.env` is the shared outreach-stack one, prefer a
+> trimmed copy holding only those keys — the classifiers run on Claude, so an
+> `OPENAI_API_KEY` in scope here buys nothing and risks something.
+
+> **A remote Claude Code session cannot see your local `.env`.** The container
+> is cloned fresh from git, and `.env` is untracked by design. To run these
+> from a web session, set the values as **environment variables on the remote
+> environment** instead of uploading the file — see
+> <https://code.claude.com/docs/en/claude-code-on-the-web>. Uploading or
+> pasting the file puts live production keys into a stored transcript.
+
+### 1. Phase 0 audit (read-only)
+
+```bash
+PIPEDRIVE_API_TOKEN=... npm run audit:coverage
+```
+
+Read `reports/coverage.md` before anything else. It tells you what share of
+organizations can be identified at all, which sets the ceiling on everything
+downstream.
+
+### 2. Create the organization fields
+
+```bash
+PIPEDRIVE_API_TOKEN=... node scripts/pipedrive_create_fields.mjs --dry-run   # look first
+PIPEDRIVE_API_TOKEN=... npm run pipedrive:fields
+npm run gen:config
+node n8n/patch/patch.mjs
+npm test
+```
+
+A second run must report **"0 created, 5 found"**. If it reports anything else,
+somebody renamed a field — matching is by name.
+
+`gen:config` and the patcher are not optional here: until they run, the
+workflow still carries the placeholder field keys and would write to nothing.
+
+### 3. Credentials in the DEV n8n project
+
+Two, by name. Values are never in this repo.
+
+| Credential | Type | Holds |
+|---|---|---|
+| `pipedrive_main` | Pipedrive API | the API token for the org GET/PATCH and the activity POST |
+| `slack_ops` | Slack API | posting to the ops channel |
+
+Three credentials that earlier versions needed are gone, and none of them was
+removed to save effort:
+
+- **`icp_webhook_basic`** and **`clay_webhook_secret`** — both webhook nodes run
+  on their unguessable path as the control. A scheme declared with no credential
+  behind it is not weaker auth, it is a dead endpoint: n8n answers every
+  delivery with 500 *"No authentication data defined on node!"* while the
+  subscription upstream still looks healthy. `validate()` now rejects either
+  half of that pair without the other.
+- **`gsheets_audit`** — there is no audit store to authenticate to. The run's
+  trace is the n8n execution itself, so the thing you reach for when a score is
+  disputed cannot be the part that failed.
+
+### 4. Environment variables on the n8n instance
+
+CONFIG reads these three at runtime. A Clay webhook URL is an unguessable
+endpoint — treat it as a secret.
+
+```
+ICP_CLAY_ENGINE_URL     the Clay ICP table's webhook source URL
+ICP_CLAY_CALLBACK_URL   the Path B webhook URL (what Clay posts back to)
+ICP_SLACK_CHANNEL       the channel id, e.g. the id of #gtm-ops-dev
+```
+
+`ICP_AUDIT_SHEET_ID` is gone, and so is its successor: there is no audit store
+at all. The run's trace lands in the n8n execution.
+
+CONFIG resolves each of the three **three ways, in order**, so the same export
+works on Cloud and self-hosted without being told which it is:
+
+1. **`$vars.NAME`** — n8n Variables. Preferred: changing a value is a UI edit,
+   no rebuild.
+2. **`$env.NAME`** — self-hosted instances with
+   `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`.
+3. **baked at build time** — whatever `ICP_*` was set in the shell that ran
+   `node n8n/patch/patch.mjs`. Lands only in the gitignored export.
+
+Each lookup is wrapped in its own `try`, because a **blocked** accessor
+*throws* rather than returning undefined — one unguarded `$env` read fails the
+entire execution on an instance that blocks it.
+
+> **On this instance (n8n Cloud, `janea-systems-2025`): `GET /variables`
+> returns 200 but `POST /variables` returns 403.** Variables are readable and
+> not writable on this plan, so layer 1 cannot be populated over the API and
+> layer 2 is blocked on Cloud. **Layer 3 is what actually delivers the values
+> here** — rebuild with the `ICP_*` variables exported, then PUT the workflow.
+> If someone later creates the Variables by hand in the UI, they silently take
+> precedence and no rebuild is needed.
+
+### 5. Build and import the workflow
+
+The workflow export is **not in git** — it embeds `credentials` blocks and the
+webhook paths, and SECURITY.md excludes both. The patcher rebuilds it
+byte-identically, so build it first:
+
+```bash
+# The webhook path IS the credential (SECURITY.md). Generate unguessable ones
+# and keep them out of the repo — the build reads them from the environment.
+export ICP_WEBHOOK_PATH_A="icp-a-$(openssl rand -hex 12)"
+export ICP_WEBHOOK_PATH_B="icp-b-$(openssl rand -hex 12)"
+node n8n/patch/patch.mjs
+```
+
+That writes three files, all gitignored:
+
+| File | Use |
+|---|---|
+| `WF-ICP-Score.dev.json` | the canonical export, with credential **names** as documentation |
+| `api-payload.json` | the four API-writable keys, credentials included |
+| `import-dev-no-credentials.json` | **import this one** — every `credentials` block stripped, name suffixed `[DEV]` |
+
+Import the credential-free payload, so the workflow cannot reach Pipedrive,
+Slack or Sheets until you attach credentials yourself:
+
+```bash
+node --env-file=/path/to/.env -e '
+  const fs = require("fs");
+  const body = fs.readFileSync("n8n/workflows/import-dev-no-credentials.json", "utf8");
+  fetch(`${process.env.N8N_BASE_URL}/api/v1/workflows`, {
+    method: "POST",
+    headers: { "X-N8N-API-KEY": process.env.N8N_API_KEY, "content-type": "application/json" },
+    body,
+  }).then(async (r) => console.log(r.status, (await r.text()).slice(0, 400)));
+'
+```
+
+Then, in the n8n UI:
+
+- [ ] add the tag **DEV** to the new workflow
+- [ ] attach the five credentials (§3) node by node
+- [ ] leave it **inactive** — arming it is yours alone
+
+> **This instance also hosts WF-1, WF-2, WF-2R and WF-2S.** Those are
+> off-limits: do not edit, deactivate or re-import any of them while doing
+> this. The import above only ever creates a new workflow — it never touches
+> an existing id.
+
+Confirm on import:
+
+- [ ] every node shows a green credential, none shows "credential not found"
+- [ ] both webhook nodes show their authentication set
+- [ ] `settings.errorWorkflow` resolves to the real WF-ERR (the export carries
+      the name `WF-ERR`; n8n may want the id)
+
+### 5b. Verify no secret reached the repo
+
+```bash
+npm run scan:secrets     # working tree, tracked + untracked
+npm run scan:history     # every blob in every commit
+```
+
+Shape-based (JWT, `sk-`, `clay_scoped_`, 40-hex, UUID, base64, credential
+blocks, live n8n webhook URLs) and it never prints a match — printing it would
+put the secret in the log that proves the secret is absent. `npm test` runs the
+tracked-file scan automatically as `posttest`.
+
+This complements rather than replaces SECURITY.md's own gate
+(`gtm_docs_export/build_docs_repo.py`), which does the literal match against
+every `.env` value over 12 characters. Run that one too before any commit that
+touches this subtree — it is the authority, because it needs no guessing.
+
+### 6. Nothing to provision
+
+There is no audit store to create. The run's trace is the n8n execution itself:
+`BuildRunSummary` is the last node on Path B, and its output IS the summary. The
+icp_audit Data Table was dropped so that a Path B run has no node which can go
+red for a reason unrelated to the score.
+
+Three organization fields, created by `scripts/pipedrive_create_fields.mjs`:
+Auto-ICP Score (text), Auto-ICP Scored At (date), Sales Rep ICP Score (text).
+The workflow writes the first two, together, and never the third.
+
+### 7. Register the Pipedrive webhook
+
+```bash
+ICP_DEV_WEBHOOK_URL="<Path A production URL>" \
+ICP_WEBHOOK_BASIC_USER=... ICP_WEBHOOK_BASIC_PASSWORD=... \
+PIPEDRIVE_API_TOKEN=... npm run pipedrive:webhook
+```
+
+Use the same user/password as the `icp_webhook_basic` credential. The script
+refuses to register an unauthenticated endpoint unless you pass
+`--allow-unauthenticated`.
+
+### 8. Live e2e
+
+```bash
+npm run live      # prints its own prerequisites and exits if any are missing
+```
+
+---
+
+## Slack alert glossary
+
+Two messages, both in the channel `ICP_SLACK_CHANNEL` points at. Every one
+carries `execution_id` — that is how you find the run.
+
+### 🚨 `ICP scoring failed`
+
+```
+:rotating_light: ICP scoring failed. org_id=<id> request_id=<id>
+execution_id=<id> error=<Name>: <message>
+```
+
+Posted from the error branch, **before** the org is marked. What the error name
+tells you:
+
+| Error name | Meaning | What to do |
+|---|---|---|
+| `IcpMalformedEvent` | Clay posted something that failed the schema check, or a callback arrived without `request_id`/`event_id`. | Open the Clay row. Usually a renamed column or an edited `post_to_n8n` body. The alert message lists every violation. |
+| `IcpUnknownPayload` | A body matched neither the Pipedrive envelope nor the Clay callback. | Both endpoints are authenticated, so this is a real caller. Check whether a second webhook subscription points here. |
+| `IcpNoIdentifier` | The org has no website, no LinkedIn URL **and** no usable name. | Nothing to enrich from. Fix the org record. |
+| `IcpMissingOptionId` | `CONFIG.opt_icp_calculated` has a `null` id. | `pipedrive_create_fields` has not been run, or was run and `gen:config` was not. Re-run both, rebuild, re-import. |
+| `IcpUnmappedGrade` | A grade with no label in `grade_labels`. | Rubric edited without regenerating CONFIG. |
+| `IcpForbiddenWrite` | A patch tried to include `ICP Final`. | A code change broke invariant 4. Do not work around it. |
+| `IcpAuditColumnMissing` | `BuildAuditRow` lost a column. | Reconcile the node against the sheet header. |
+
+If the alert arrives but **no** `Error` appears on the organization, the PATCH
+also failed. That is why the alert comes first. Look for a second failure from
+WF-ERR.
+
+### ⚠️ `ICP scoring trigger volume is unusually high`
+
+```
+:warning: ICP scoring trigger volume is unusually high: <n> events this hour
+(limit <max>). A bulk import can burn Clay credits fast.
+execution_id=<id> request_id=<dedupe key>
+```
+
+The anomaly gate. **Non-blocking** — processing continues. Normal volume is
+~15 deals/day (Phase 0 measured 2,000 organizations over four months), so this
+firing means a bulk import or a loop. Decide whether to let it run; to stop it,
+deactivate the workflow (below) — the deals stay, and they will be scored when
+you reactivate, because the org-level gate is durable.
+
+Threshold: `CONFIG.max_events_per_hour`, currently **200**.
+
+---
+
+## Debugging: start here
+
+Every artefact carries `request_id`. One search finds the whole story.
+
+```
+1. Slack alert            -> execution_id and request_id
+2. n8n execution list     -> filter by execution_id, open it, read the node outputs
+3. the n8n execution      -> BuildRunSummary's output: one flat summary per run
+4. the Pipedrive note     -> the footer carries "request_id <id>"
+5. the Clay row           -> request_id is column 1
+```
+
+The `error` column of the audit row is the fastest read: it carries
+`duplicate`, `rate_exceeded:<n>/h`, and `clay_score_drift:<detail>`.
+
+---
+
+## Symptom → cause
+
+### Deals are created but nothing happens
+
+- Is the workflow **active**? The export ships `active: false` on purpose.
+- Is the webhook registered? `node scripts/pipedrive_register_webhook.mjs --list`.
+- Is it pointing at the **production** URL of the webhook node, not the test URL?
+- Check the n8n execution list for failed runs — a basic-auth mismatch shows as
+  a 403 with no execution at all.
+
+### An organization shows `Insufficient data`
+
+Usually correct, not a bug. `stage_maturity`, `revenue_range` and
+`company_type` each gate it, and Phase 0 found **76.8%** of organizations reach
+Clay as a bare name. Read the note's `Missing / low confidence:` line — it
+names the facts the classifiers wanted. The fix is enrichment coverage, not
+scoring.
+
+### An organization shows `Error`
+
+See the alert glossary. Once fixed, it re-scores on the next deal:
+`Error` is deliberately **not** counted as a fresh score
+(`CONFIG.rescore_on_error_or_insufficient`), so a transient outage cannot
+freeze an account out of scoring for 180 days.
+
+### The score looks wrong
+
+1. Open the note. It shows every component level, the level text, the evidence,
+   the multiplier and the arithmetic. Nine times in ten the classifier is
+   defensible and the *facts* are wrong.
+2. Check the audit row's `flags` column:
+   - `unknown_vertical` — the classifier returned a vertical outside the 17
+   - `contracting_without_dated_evidence` — an undated Contracting was downgraded
+   - `clay_score_drift` — **Clay and n8n disagreed** (see below)
+   - `tier2_candidate` — over $500M revenue, over 1,000 headcount, or type 7
+3. Re-derive it: the note carries every input, and `engine/scoring.mjs` is pure.
+
+### `clay_score_drift` in the flags
+
+Clay's `score_json` column disagreed with n8n's independent recompute. **n8n's
+value was written** — it is the one with 500 parity cases behind it. The Clay
+formula column is stale:
+
+```bash
+npm run gen:formula        # regenerate from the current rubric
+# then re-paste the STEP 3 block from engine/clay_formula.txt into the column
+```
+
+The audit row's `error` column carries the exact field-by-field difference.
+
+### An organization was scored twice
+
+It should not be, and the audit row will say which layer let it through.
+Two records for one company is the likelier cause: Phase 0 found 23
+normalized-name clusters in a 2,000-organization sample, including
+**Sumersports five times**. Dedup is out of Phase 1 scope — two records get two
+grades, correctly, because they are two organizations as far as Pipedrive is
+concerned.
+
+### A rep's edit to `ICP Calculated` disappeared
+
+Expected (NEEDS_DECISION #2, honor system). `ICP Calculated` is the system's
+field; `ICP Final` is the human's, and the system never touches it. A
+`NOTE_WATCHDOG` comment in `BuildOrgPatch.js` marks where a
+`change.organization` watchdog would attach if the honor system does not hold.
+
+### Duplicate notes on one organization
+
+Should be impossible: `POST note` has `retryOnFail: false`, a Path B duplicate
+skips the note, and an empty patch skips it too. If it happens, check whether
+two n8n instances hold the same webhook path.
+
+---
+
+## Changing a scoring number
+
+Every number lives in `config/rubric_v6.json`.
+
+```bash
+$EDITOR config/rubric_v6.json
+npm run gen:prompts && npm run gen:formula && npm run gen:config && npm run gen:nodes
+node n8n/patch/patch.mjs
+npm test
+```
+
+Then, because two of the four consumers are outside this repo:
+
+1. Re-paste the seven prompts into the Clay AI columns.
+2. Re-paste `engine/clay_formula.txt` STEP 3 into `score_json`.
+3. Re-import the workflow into DEV.
+
+**Bump `model_version`** if the change alters scores. Every organization scored
+on the old version then re-scores automatically on its next deal, because the
+gate compares versions as well as dates. Leaving the version alone after a
+scoring change leaves a Pipedrive full of scores from two different rubrics
+with nothing to tell them apart.
+
+---
+
+## Rolling back
+
+The workflow is a build artefact, so rollback is a rebuild.
+
+```bash
+git log --oneline -- icp-scoring/n8n/workflows/WF-ICP-Score.dev.json
+git checkout <sha> -- icp-scoring/
+npm test
+node n8n/patch/patch.mjs --check     # confirms the export matches its sources
+# re-import into DEV
+```
+
+Before any re-import, record the current `versionId` from n8n so you can get
+back. The Pipedrive **data** is not rolled back by any of this: a wrong grade
+already written stays until the next scoring run overwrites it.
+
+---
+
+## Turning it off
+
+| How | Effect |
+|---|---|
+| Deactivate in n8n | Both paths stop. In-flight Clay rows will POST to Path B and get a 404. |
+| Delete the Pipedrive webhook | Path A stops; Path B still accepts callbacks. The cleaner stop. |
+| Pause the Clay table | Path A still fires and POSTs; no callbacks come back. Organizations stay unscored, no `Error`. |
+
+To stop scoring **without** losing work: delete the Pipedrive webhook and let
+the in-flight Clay rows finish. No organization is left half-written, because
+the writes all happen in one Path B execution.
+
+```bash
+node scripts/pipedrive_register_webhook.mjs --list
+curl -X DELETE -H "x-api-token: $PIPEDRIVE_API_TOKEN" \
+  https://api.pipedrive.com/api/v1/webhooks/<id>
+```
+
+---
+
+## What this workflow will never do
+
+Worth knowing before you go looking for a bug that is a design decision.
+
+- **Never write `ICP Final`.** It is the human's field.
+- **Never read `ICP Final`** as scoring input.
+- **Never create or merge an organization.** It scores what exists.
+- **Never contact anyone.** No email, no LinkedIn, no sequence. A DNC'd
+  company still gets scored — that is an internal analytical act, not contact.
+- **Never write the same value twice.** An unchanged value produces an empty
+  patch and no API call.
+- **Never publish to production.** `/publish` is human-gated and this repo
+  does not implement it.

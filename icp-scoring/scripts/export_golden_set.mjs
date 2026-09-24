@@ -1,0 +1,308 @@
+#!/usr/bin/env node
+// scripts/export_golden_set.mjs — Test Accounts CSV -> tests/golden/expected.json
+//
+// Nik exports the "Test Accounts" sheet from the ICP workbook as CSV and points
+// this at it:
+//
+//   node scripts/export_golden_set.mjs path/to/Test_Accounts.csv
+//   ICP_TEST_ACCOUNTS_CSV=path/to/file.csv npm run golden:export
+//
+// With no CSV it does NOT invent rows and does NOT wipe what is there: it
+// reports what the existing expected.json holds and exits 0, so `npm test`
+// keeps working before the sheet lands.
+//
+// Expected CSV headers (case- and space-insensitive, extra columns ignored):
+//   Account | Vertical | Activation | Expected Grade
+// `Expected Grade` is blank for most rows until Toby fills in Stage/Type/Geo/
+// Revenue. A blank grade is preserved as null, and golden.test.mjs then asserts
+// only the vertical -> industry_level mapping for that row.
+
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, basename } from 'node:path';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const OUT = join(ROOT, 'tests', 'golden', 'expected.json');
+const RUBRIC = JSON.parse(readFileSync(join(ROOT, 'config', 'rubric_v6.json'), 'utf8'));
+
+const csvPath = process.argv[2] || process.env.ICP_TEST_ACCOUNTS_CSV || null;
+
+/**
+ * RFC 4180-ish parser: quoted fields, embedded commas, doubled quotes, CRLF.
+ *
+ * Blank rows are KEPT. The exported sheet separates its data block from its
+ * "How to use this sheet" instructions with exactly one blank line, and that
+ * line is the only unambiguous end-of-data marker — the instruction rows
+ * themselves look like accounts called "1.", "2." and so on.
+ */
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i += 1; } else { quoted = false; }
+      } else { field += ch; }
+      continue;
+    }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === ',') { row.push(field); field = ''; continue; }
+    if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i += 1;
+      row.push(field); field = '';
+      rows.push(row);
+      row = [];
+      continue;
+    }
+    field += ch;
+  }
+  row.push(field);
+  if (row.some((f) => f.trim() !== '')) rows.push(row);
+  return rows;
+}
+
+const norm = (s) => String(s || '').trim().toLowerCase().replace(/[\s_]+/g, ' ');
+
+/** Map a sheet vertical string onto a rubric vertical, or report it unmatched. */
+function matchVertical(raw) {
+  const value = String(raw || '').trim();
+  if (value === '') return null;
+  const verticals = Object.keys(RUBRIC.industry_verticals);
+  const exact = verticals.find((v) => v === value);
+  if (exact) return exact;
+  // Tolerate hyphen/en-dash and spacing differences, nothing more. A vertical
+  // the sheet spells differently is a discrepancy worth reporting, not
+  // silently coercing.
+  // Anything that is not a letter or a digit is noise for matching purposes:
+  // the sheet exports "SaaS \ufffd Other" where the rubric has an em dash, and a
+  // mojibake dash is not a different vertical.
+  const loose = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return verticals.find((v) => loose(v) === loose(value)) || { unmatched: value };
+}
+
+if (!csvPath) {
+  process.stdout.write('No CSV given (argv[1] or ICP_TEST_ACCOUNTS_CSV).\n');
+  if (existsSync(OUT)) {
+    const current = JSON.parse(readFileSync(OUT, 'utf8'));
+    const graded = current.accounts.filter((a) => a.expected_grade !== null).length;
+    process.stdout.write(
+      `Left tests/golden/expected.json untouched: ${current.accounts.length} accounts, ` +
+      `${graded} with a human grade, source "${current.source}".\n`
+    );
+  } else {
+    process.stdout.write('tests/golden/expected.json does not exist yet.\n');
+  }
+  process.stdout.write(
+    '\nTo populate it: export the "Test Accounts" sheet as CSV and re-run with the path.\n'
+  );
+  process.exit(0);
+}
+
+if (!existsSync(csvPath)) {
+  process.stderr.write(`CSV not found: ${csvPath}\n`);
+  process.exit(1);
+}
+
+const rows = parseCsv(readFileSync(csvPath, 'utf8'));
+if (rows.length < 2) {
+  process.stderr.write('CSV has no data rows.\n');
+  process.exit(1);
+}
+
+// The exported sheet carries a title row, a description row and a blank before
+// the real header, and the header cells themselves contain newlines ("Industry
+// vertical\n(dropdown)"). So the header is found, not assumed — and its cells
+// are collapsed to one line first.
+const flat = (cell) => String(cell || '').replace(/\s+/g, ' ').trim();
+const headerIndex = rows.findIndex((row) => row.some((c) => ['org', 'account', 'organization', 'company'].includes(norm(flat(c)))));
+if (headerIndex === -1) {
+  process.stderr.write('No header row found: no cell reads Org / Account / Organization / Company.\n');
+  process.exit(1);
+}
+const header = rows[headerIndex].map((c) => norm(flat(c)));
+// The sheet's headers carry their own annotations — "Industry vertical
+// (dropdown)", "Composite (weighted)", "Final score". Exact matching would miss
+// all of them, so a name matches when the header STARTS with it, longest name
+// first so "revenue" does not win over a more specific column.
+const col = (...names) => {
+  for (const name of names) {
+    const idx = header.indexOf(norm(name));
+    if (idx !== -1) return idx;
+  }
+  for (const name of names) {
+    const want = norm(name);
+    const idx = header.findIndex((h) => h === want || h.startsWith(`${want} (`) || h.startsWith(`${want} `));
+    if (idx !== -1) return idx;
+  }
+  return -1;
+};
+
+const iAccount = col('account', 'org', 'organization', 'company', 'company name');
+const iVertical = col('vertical', 'industry vertical', 'industry');
+const iActivation = col('activation', 'activation state');
+const iGrade = col('expected grade', 'grade', 'expected', 'icp', 'icp fit grade (auto)', 'icp fit grade');
+// Computed columns, carried for cross-checking the engine against the sheet's
+// own arithmetic rather than for scoring anything.
+const iIndustryScore = col('industry score (auto)', 'industry score');
+const iComposite = col('composite (weighted)', 'composite');
+const iFinal = col('final score', 'final');
+const iSalesPath = col('sales path (dropdown)', 'sales path');
+
+// Per-component human calls. Each is optional: a blank cell means "no human
+// opinion recorded", which golden.test.mjs reports as a gap rather than
+// counting as agreement or disagreement.
+const COMPONENT_COLUMNS = {
+  company_type: col('co type', 'company type', 'type'),
+  stage_maturity: col('stage', 'stage maturity'),
+  geography: col('geo', 'geography'),
+  revenue_range: col('revenue', 'revenue range', 'revenue band'),
+  buying_signal: col('signal (hold)', 'signal'),
+};
+
+// Rows the sheet's own reviewers marked as doubtful. Flagged, scored, and
+// excluded from the agreement rate — a disputed human call is not a yardstick.
+// The numbers are 1-based data rows, matching how the sheet is read aloud.
+const SUSPECT_ROWS = new Set(
+  (process.env.ICP_SUSPECT_ROWS || '13,14,15')
+    .split(',').map((n) => Number(n.trim())).filter((n) => Number.isFinite(n))
+);
+
+/** A level cell: "10", "level 7", "7 — software-native". */
+const parseLevel = (raw) => {
+  const text = String(raw || '').trim();
+  if (text === '') return null;
+  const m = text.match(/\b(0|3|7|10)\b/);
+  return m ? Number(m[1]) : { unmatched: text };
+};
+
+if (iAccount === -1) {
+  process.stderr.write(`No account column found. Headers seen: ${rows[0].join(' | ')}\n`);
+  process.exit(1);
+}
+
+const existing = existsSync(OUT) ? JSON.parse(readFileSync(OUT, 'utf8')) : { accounts: [] };
+const priorByOrg = new Map(existing.accounts.map((a) => [norm(a.org), a]));
+
+const accounts = [];
+const discrepancies = [];
+
+// The sheet ends its data with a blank row and then a "How to use this sheet"
+// block whose first column holds "1.", "2." … Those are instructions, not
+// accounts, so the data stops at the first blank Org rather than filtering the
+// instructions out by shape and hoping no account is ever called "3.".
+let dataRow = 0;
+let ended = false;
+for (const row of rows.slice(headerIndex + 1)) {
+  const org = flat(row[iAccount]);
+  if (org === '') { ended = true; continue; }
+  if (ended) break;
+  dataRow += 1;
+
+  const verticalRaw = iVertical === -1 ? '' : row[iVertical];
+  const matched = matchVertical(verticalRaw);
+  let vertical = null;
+  if (matched && matched.unmatched) {
+    discrepancies.push(`${org}: vertical "${matched.unmatched}" is not one of the 17 rubric verticals`);
+  } else {
+    vertical = matched;
+  }
+
+  const activationRaw = iActivation === -1 ? '' : String(row[iActivation] || '').trim();
+  let activation = null;
+  if (activationRaw !== '') {
+    const states = Object.keys(RUBRIC.activation_multipliers);
+    activation = states.find((s) => norm(s) === norm(activationRaw)) || null;
+    if (activation === null) {
+      discrepancies.push(`${org}: activation "${activationRaw}" is not one of ${states.join('/')}`);
+    }
+  }
+
+  // A Tier 2 row shows its sales path INSTEAD of a letter. That is the sheet
+  // saying "the grade does not apply here", not a missing grade — so it is
+  // recorded as its own fact and never read as an expected letter.
+  const gradeRaw = iGrade === -1 ? '' : flat(row[iGrade]);
+  const salesPath = iSalesPath === -1 ? '' : flat(row[iSalesPath]);
+  const tier2 = /tier 2/i.test(gradeRaw) || /tier 2/i.test(salesPath);
+  let expectedGrade = null;
+  if (!tier2 && gradeRaw !== '') {
+    const m = gradeRaw.toUpperCase().match(/\b([ABC])\b/);
+    if (m) expectedGrade = m[1];
+    else discrepancies.push(`${org}: expected grade "${gradeRaw}" is not A, B or C`);
+  }
+
+  const num = (idx) => {
+    if (idx === -1) return null;
+    const v = Number(String(row[idx] || '').replace(/[^0-9.\-]/g, ''));
+    return Number.isFinite(v) && String(row[idx] || '').trim() !== '' ? v : null;
+  };
+
+  // Hard assertions and facts_file bindings are properties of this repo, not
+  // of the sheet, so carry them forward from the existing file.
+  const prior = priorByOrg.get(norm(org)) || {};
+
+  const components = {};
+  for (const [name, idx] of Object.entries(COMPONENT_COLUMNS)) {
+    if (idx === -1) continue;
+    const level = parseLevel(row[idx]);
+    if (level && level.unmatched !== undefined) {
+      discrepancies.push(`${org}: ${name} "${level.unmatched}" is not a level 0/3/7/10`);
+      continue;
+    }
+    if (level !== null) components[name] = level;
+  }
+  if (vertical !== null) components.industry_vertical = vertical;
+  if (activation !== null) components.activation_state = activation;
+
+  accounts.push({
+    org,
+    row: dataRow,
+    facts_file: prior.facts_file || null,
+    vertical,
+    activation,
+    expected_components: Object.keys(components).length > 0 ? components : null,
+    expected_grade: expectedGrade,
+    tier2: tier2,
+    sheet: {
+      industry_score: num(iIndustryScore),
+      composite: num(iComposite),
+      final: num(iFinal),
+      grade_cell: gradeRaw || null,
+    },
+    suspect: SUSPECT_ROWS.has(dataRow),
+    hard_assertion: prior.hard_assertion || null,
+  });
+}
+
+// Keep any prior account the sheet no longer lists, so the three hard
+// assertions cannot be dropped by an incomplete export.
+for (const prior of existing.accounts) {
+  if (accounts.some((a) => norm(a.org) === norm(prior.org))) continue;
+  // Only rows this repo owns something about are worth retaining. Anything
+  // else is residue from an earlier, worse parse of the same sheet, and
+  // carrying it forward makes a bad export permanent.
+  if (!prior.hard_assertion && !prior.facts_file) continue;
+  accounts.push({ ...prior, _retained: 'not present in the latest CSV export' });
+}
+
+const out = {
+  _comment: 'GENERATED by scripts/export_golden_set.mjs from the Test Accounts sheet. facts_file and hard_assertion are repo-side bindings and are carried forward across exports.',
+  source: basename(csvPath),
+  exported_at: new Date().toISOString(),
+  model_version: RUBRIC.model_version,
+  accounts,
+};
+
+writeFileSync(OUT, `${JSON.stringify(out, null, 2)}\n`, 'utf8');
+
+const graded = accounts.filter((a) => a.expected_grade !== null).length;
+process.stdout.write(
+  `wrote tests/golden/expected.json — ${accounts.length} accounts, ${graded} with a human grade\n`
+);
+if (discrepancies.length > 0) {
+  process.stdout.write(`\n${discrepancies.length} discrepancy/ies against the rubric:\n`);
+  for (const d of discrepancies) process.stdout.write(`  - ${d}\n`);
+  process.stdout.write('\nThe CSV wins on business content; these are reported, not corrected.\n');
+}

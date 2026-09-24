@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://janeasystems.com/icp/enrichment_facts.schema.json",
+  "title": "Enrichment facts",
+  "description": "The complete input every classifier receives. Built by the Clay `facts_json` formula column from the enrichment columns. A fact that could not be enriched is present and null - it is never omitted, so that a classifier can tell 'not found' from 'not asked'.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id", "org_id",
+    "domain", "linkedin_url", "company_name", "hq_country", "hq_state",
+    "li_headcount", "li_industry", "li_description", "li_founded", "li_hq",
+    "website_summary", "revenue_estimate_usd", "revenue_source",
+    "funding_stage", "last_round_date", "last_round_usd",
+    "open_eng_roles_count", "eng_roles_open_60d_plus", "senior_eng_roles",
+    "eng_headcount_estimate", "news_last_12mo"
+  ],
+  "properties": {
+    "request_id":   { "type": "string", "minLength": 1, "description": "n8n correlation id; echoed on every artefact" },
+    "org_id":       { "type": "string", "minLength": 1, "description": "Pipedrive organization id, as a string" },
+    "deal_id":      { "type": ["string", "null"], "description": "Pipedrive deal id that triggered the scoring" },
+    "domain":       { "type": "string", "minLength": 1, "description": "the ONE identifier, sent by n8n and already normalized: lowercase, no scheme, no www., no path. Never null — a row only exists because a domain was resolvable." },
+    "linkedin_url": { "type": ["string", "null"], "description": "enrichment OUTPUT, not an input: what the table found from the domain. v6.0 accepted this from the webhook as a fallback identifier; it no longer is one." },
+    "company_name": { "type": ["string", "null"], "description": "enrichment OUTPUT. v6.0 took it from the webhook to drive a find_by_name lookup; there is no name lookup any more." },
+    "hq_country":   { "type": ["string", "null"], "description": "enrichment OUTPUT; v6.0 took it from the webhook to disambiguate a name lookup." },
+    "hq_state":     { "type": ["string", "null"], "description": "enrichment OUTPUT; v6.0 took it from the webhook to disambiguate a name lookup." },
+
+    "li_headcount":    { "type": ["integer", "null"], "minimum": 0 },
+    "li_industry":     { "type": ["string", "null"] },
+    "li_description":  { "type": ["string", "null"] },
+    "li_founded":      { "type": ["integer", "null"], "minimum": 1800 },
+    "li_hq":           { "type": ["string", "null"] },
+    "website_summary": { "type": ["string", "null"], "description": "homepage + /about + /product + /careers scrape, summarized" },
+
+    "revenue_estimate_usd": { "type": ["number", "null"], "minimum": 0 },
+    "revenue_source":       { "type": ["string", "null"], "description": "which provider produced revenue_estimate_usd; NEEDS_DECISION #9 default is Apollo" },
+
+    "funding_stage":   { "type": ["string", "null"] },
+    "last_round_date": { "type": ["string", "null"], "description": "ISO 8601 date" },
+    "last_round_usd":  { "type": ["number", "null"], "minimum": 0 },
+
+    "open_eng_roles_count":    { "type": ["integer", "null"], "minimum": 0 },
+    "eng_roles_open_60d_plus": { "type": ["integer", "null"], "minimum": 0 },
+    "senior_eng_roles":        { "type": ["integer", "null"], "minimum": 0 },
+    "eng_headcount_estimate":  { "type": ["integer", "null"], "minimum": 0 },
+
+    "news_last_12mo": {
+      "type": ["array", "null"],
+      "maxItems": 25,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["date", "headline"],
+        "properties": {
+          "date":     { "type": "string", "description": "ISO 8601 date; the classifier needs it to age Contracting evidence" },
+          "headline": { "type": "string", "maxLength": 300 },
+          "source":   { "type": ["string", "null"] },
+          "url":      { "type": ["string", "null"] }
+        }
+      }
+    },
+
+    "captured_at": { "type": ["string", "null"], "description": "when Clay produced this fact set" },
+    "SYNTHETIC":   { "type": ["boolean", "null"], "description": "true only for the hand-authored day-one harness fixtures" },
+    "synthetic_classifier_output": {
+      "type": ["object", "null"],
+      "description": "Present ONLY on SYNTHETIC fixtures. Lets the golden harness exercise the scoring path with no Anthropic API key. Never present on facts captured from Clay."
+    }
+  }
+}

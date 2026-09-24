@@ -1,0 +1,21 @@
+{
+  "_comment": "Placeholders only. Real values live in the n8n instance environment (see RUNBOOK.md step 4) and in Clay's own secret store. Nothing here is a secret, and no real value should ever be committed to this file.",
+  "table": "ICP_Engine",
+  "model_version": "v5",
+  "webhook_source_url": "https://REPLACE_ME.clay.example/webhook/icp-engine",
+  "webhook_source_url_env": "ICP_CLAY_WEBHOOK_URL",
+  "n8n_callback_url": "https://REPLACE_ME.n8n.example/webhook/icp-scored-clay-dev",
+  "n8n_callback_url_env": "ICP_CLAY_CALLBACK_URL",
+  "callback_header_name": "X-Clay-Secret",
+  "callback_header_value": "<held in Clay's secret store; the matching n8n credential is clay_webhook_secret>",
+  "retry_policy": { "on_5xx": 3, "on_4xx": 0 },
+  "classifier": {
+    "provider": "anthropic",
+    "temperature": 0,
+    "structured_output_schema": "engine/schemas/classifier_output.schema.json",
+    "one_call_per_component": true,
+    "web_access": false
+  },
+  "column_spec": "engine/clay_table_spec.md",
+  "score_formula": "engine/clay_formula.txt"
+}
