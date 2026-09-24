@@ -54,10 +54,16 @@ n8n/nodes/CONFIG.local.json
 # allow-list: the JSON sources this subtree cannot work without
 # ---------------------------------------------------------------------------
 !config/rubric_v5.json
+# The rubric every generator declares as its source. It sat untracked from 17 Sep
+# to 24 Sep because this list never named it: the maintainer's tree built, and a
+# fresh clone failed 13 of 194 files on ENOENT. tests/static/fresh_clone.test.mjs
+# now fails if a source the suite reads is missing from git.
+!config/rubric_v6.json
 !config/pipedrive_fields.json
 !config/clay.example.json
 !engine/schemas/*.json
 !engine/schemas/openai/*.json
+!engine/schemas/v5/*.json
 !n8n/nodes/CONFIG.json
 !tests/fixtures/pipedrive/*.json
 !tests/fixtures/clay/*.json
@@ -70,8 +76,8 @@ n8n/nodes/CONFIG.local.json
 # ---------------------------------------------------------------------------
 # allow-list: Python
 #
-# The repository root excludes `*.py` wholesale, exactly as it excludes
-# `*.json`, and it swallowed this subtree's Python the same way: commit 1a7729d
+# The repository root excluded `*.py` wholesale until 2026-09-24 (it no longer
+# does), and it swallowed this subtree's Python the same way: commit 1a7729d
 # is titled "Python port of the scorer" and does not contain the scorer. A fresh
 # clone had no engine/clay_score.py, so tests/contract/python_parity.test.mjs
 # and tests/static/clay_nodes.test.mjs could not have passed from one.
@@ -81,3 +87,4 @@ n8n/nodes/CONFIG.local.json
 # ---------------------------------------------------------------------------
 !engine/clay_score.py
 !clay/code/*.py
+!tests/python/*.py
