@@ -274,7 +274,7 @@ Off, plus a queue table the monitor says does not exist, is what makes the gate'
 ## The I-04 CRM-change watch
 
 ### dnc_i04_event_receiver — `wqORtqgRJ3W5YvBL` · ACTIVE · 5 nodes · 1,355 runs
-Receives Pipedrive's own webhooks at `/webhook/{{WEBHOOK_I04_PIPEDRIVE_EVENTS}}`, understands both v1 and v2 webhook shapes, keeps only `lead` and `person` objects, and writes one row per event into the event table with the raw payload preserved. Answers `200` on receipt, before processing.
+Receives Pipedrive's own webhooks at `/webhook/{{WEBHOOK_I04_PD_EVENTS}}`, understands both v1 and v2 webhook shapes, keeps only `lead` and `person` objects, and writes one row per event into the event table with the raw payload preserved. Answers `200` on receipt, before processing.
 
 **Failure mode:** if the Pipedrive subscription is deleted or expires, this simply goes quiet — and quiet looks identical to "nothing changed". The daily summary is what catches that (below).
 

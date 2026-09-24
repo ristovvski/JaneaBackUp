@@ -159,3 +159,102 @@ tables that certainly existed (`R13`) — anything that needs them must convert 
 **Reporting.** The morning digest no longer reports whether an I-04 job ran. It reports
 `CRM change log N events` off the event table, and prints `unreadable` rather than `0` when it
 cannot measure.
+
+---
+
+# Traps — added 2026-09-11
+
+## T1. The alert is the one surface where omitting a field is the same as lying
+
+Person-8768306e (President @ Circle) accepted a LinkedIn connection request. HeyReach emitted
+`connection_request_accepted` and `message_reply_received` in the **same millisecond**, and the
+reply carried one correspondent entry with `message: ""`. WF-1 alerted #lead-processing, wrote a
+**permanent** `reply_dnc` registry row, set `3. Responded` and opened a handover task — for a man
+who had said nothing.
+
+The alert read:
+
+> 💬 Person-8768306e (President @ Circle) · […] - Noah - LinkedIn · via Noah Keimach — Open lead
+> **Details:** Name … Company … LinkedIn profile …
+
+Indistinguishable from a real reply. And here is the part that matters: **the workflow knew.**
+`M7 Build.render()` has always returned `'[empty message]'` for a blank body, and wrote exactly that
+into the CRM activity note — 15 characters, `[empty message]`, sitting on the lead card the whole
+time. The CRM told the truth; the channel a human actually reads dropped the one field that carried
+it.
+
+**Rule.** An alert that reports THAT something happened without reporting WHAT is not a
+notification, it is a rumour. Every alert quotes the payload it is alerting about — the reply text,
+the error message, the value that changed — or it does not go out. Truncate it, never omit it.
+Fixed in WF-1 by appending `Reply:` (first 120 chars) to the alert body; `[empty message]` now
+reaches the channel that can act on it.
+
+## T2. A write path that cannot record WHY is a false audit trail waiting to happen
+
+`dnc_s4_retirement_removal` — the driver behind the 7,450-row tombstoning — read `row_ids` and
+`dry_run` from its caller and **hardcoded**:
+
+```js
+removed_reason: 'rule_change_2026-08-26_melisa'
+```
+
+So the correction of Heath's false suppression would have been filed as Melisa's August rule change.
+The row would have been removed correctly and the record of why would have been wrong — which is
+worse than no record, because a wrong record is believed.
+
+**Rule.** Any write that stamps a reason, an actor, or a justification takes that value **from the
+caller**, with the old constant as the default so existing callers are byte-identical. A constant
+frozen at authoring time is a value that will eventually describe a different event than the one
+that is happening.
+
+**Sweep, same day (v2, `WF_LINTER/sweep_hardcoded_constants.py`).** Scope matters: v1 searched only
+inside mutating nodes, found "5 findings, all benign", and missed *both* known cases — in this
+estate the request body is assembled in a preceding **Code** node. v2 scans every node from which a
+mutating node is reachable, and carries a self-check that fails loudly if it stops finding the two
+we already know about. On ACTIVE workflows it found:
+
+| where | constant | verdict |
+|---|---|---|
+| WF-1 `M6 Build`, `M7 Build`, `Person Create`, `Create Lead`, `Create Activity`, `M8 Task` | `owner_id = CONFIG.melisa_user_id` | one named human owns everything both receivers create; no per-campaign or per-sender mapping exists |
+| WF-2 `Body Lead Create`, `Body Person Create`, `Body Org Create`, `Body Reply Activity`, `Body Bounce Note`, `R Body Lead Create`, `R Body Person Create` | `owner_id = CONFIG.owner_id` (same id) | the third instance — the email side has the identical hardcode |
+| **WF-1 `M7 DNC Build Input` and WF-2 `DNC Build Input`** | **`date_precision: 'unknown'`** | **load-bearing.** `reasonExpiryOverride('reply_dnc','unknown')` returns `expires_at: null`, so this literal is why every reply-driven suppression is PERMANENT rather than TTL-bounded. Frozen in both receivers. |
+| WF-1 `M7 DNC Build Input` | `reply_category: 'linkedin_reply_uncategorised'` | deliberate placeholder, documented |
+| S1/S2/S3 build nodes | `reason: 'reply_dnc' / 'meeting_dnc' / 'sales_personal_outreach'` | legitimate — the workflow *is* that reason |
+
+The first two are decisions to take, not bugs to fix silently. The third is the one to look at
+hardest: a single literal, in two places, deciding that everyone who replies is suppressed forever.
+
+## T3. HeyReach webhooks carry no attachment marker — `render()`'s branches are dead
+
+The complete union of every leaf in a `message_reply_received` / `every_message_reply_received`
+payload gives exactly three message fields: `creation_time`, `is_reply`, `message`. There is no
+`message_type`, no `attachments`, no `media`, no `content_type`.
+
+`M7 Build.render()` reads `m.message_type` and returns `'[attachment]'` / `'[voice note]'` from it.
+**Those branches have never fired, in any execution, ever.** An attachment-only reply is
+byte-identical to an empty one on this surface.
+
+The inbox API is different: `GetConversationsV2` carries `isVoiceNote`, `transcript`, `postLink`,
+and a conversation-level **`lastMessageType`** which does take the value `ATTACHMENT` (5 of 600+
+sampled). It is not available to a webhook-driven gate without an extra call.
+
+**CORRECTION, same day.** An earlier version of this entry said `lastMessageType` read `TEXT` while
+the UI showed "Attachment(s)", implying the API was unreliable. It is not. Nik opened the
+conversation itself: Heath's bubble is **empty** — no rendered attachment, no file, no voice note —
+stamped the same minute as Noah's invite. It is an accept surfacing as a reply. The API's `TEXT` was
+**right**: it is a textless TEXT message. **"Attachment(s)" is HeyReach's list caption for any
+message with no text, not evidence of a file.** The marker is trustworthy; the list label is not.
+Two of the five `ATTACHMENT` conversations really do carry files.
+
+**Consequence, ruled:** no gate. A blank body alerts, and the line reads
+`Reply: [no text — manually check the inbox; could be an attachment or an empty connection-accept]`
+in Slack **and** in the CRM activity note — naming the common cause first, because the accept
+artefact is the usual one and the UI's own caption points the reader the wrong way. The ambiguity
+goes to the only surface that can resolve it: a human opening the conversation. That loop has now
+run once end to end and worked.
+
+## T4. The registry retirement path has no reactivate
+
+`dnc_s4_retirement_removal` sets `status: removed` and nothing sets it back. Reversing a tombstone
+needs a one-shot driver against the data table (the registry has no REST API, so it runs inside
+n8n). Discovered while reverting a tombstone that should never have been written.

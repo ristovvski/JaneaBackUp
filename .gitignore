@@ -1,5 +1,4 @@
-# This is a DOCUMENTATION repository. Everything that is not markdown is excluded by default, so a
-# careless `git add .` cannot sweep in a workflow export or a credential file. See SECURITY.md.
+# Documentation AND the code that operates the estate. Data stays out. See SECURITY.md.
 
 # credentials and certificates
 .env
@@ -10,19 +9,26 @@
 *.pfx
 *_ca_bundle*
 
-# workflow exports and API captures: credential references, live webhook paths, raw prospect data
+# LOCAL-ONLY handover artefacts - each contains exactly what the scrub removes
+scrub.sed
+_pii*
+_live_webhook*
+_rewrite_commit_map*
+_operator_facts*
+gtm_docs_export/
+
+# data: workflow exports, API captures, repair maps, populations, fixtures with real people.
+# icp-scoring/ tracks its own reviewed JSON (config + golden set of companies) - force-added, kept.
 *.json
 !package.json
 
-# tooling and run output
-*.py
-*.ps1
-*.sh
+# run output and caches
 *.log
 *.out
 *.out.log
 __pycache__/
 .venv/
+node_modules/
 
 # provider data dumps
 *.csv

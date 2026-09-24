@@ -763,7 +763,7 @@ Off, plus a queue table the monitor says does not exist, is what makes the gate'
 ### The I-04 CRM-change watch
 
 #### dnc_i04_event_receiver — `wqORtqgRJ3W5YvBL` · ACTIVE · 5 nodes · 1,355 runs
-Receives Pipedrive's own webhooks at `/webhook/{{WEBHOOK_I04_PIPEDRIVE_EVENTS}}`, understands both v1 and v2 webhook shapes, keeps only `lead` and `person` objects, and writes one row per event into the event table with the raw payload preserved. Answers `200` on receipt, before processing.
+Receives Pipedrive's own webhooks at `/webhook/{{WEBHOOK_I04_PD_EVENTS}}`, understands both v1 and v2 webhook shapes, keeps only `lead` and `person` objects, and writes one row per event into the event table with the raw payload preserved. Answers `200` on receipt, before processing.
 
 **Failure mode:** if the Pipedrive subscription is deleted or expires, this simply goes quiet — and quiet looks identical to "nothing changed". The daily summary is what catches that (below).
 
@@ -1224,8 +1224,8 @@ Every row the ledger has inserted since at least 14 August still carries `projec
 
 ### 8. If you need to change something
 
-- **Retire rows:** `POST /webhook/{{WEBHOOK_DNC_S4_RETIREMENT}}` with `{"row_ids": [...], "dry_run": false}`. Dry-run is the default; you must pass `false` explicitly. There is no undo — re-adding means re-filing through the ledger.
-- **Import a list:** `POST /webhook/{{WEBHOOK_DNC_ARCHIVED_IMPORT}}` with validated rows. It refuses the whole call if any row has an unknown reason, a `reply_dnc` without a category, or no email and no LinkedIn URL.
+- **Retire rows:** `POST /webhook/{{WEBHOOK_DNC_S4_RETIREMENT_REMOVAL}}` with `{"row_ids": [...], "dry_run": false}`. Dry-run is the default; you must pass `false` explicitly. There is no undo — re-adding means re-filing through the ledger.
+- **Import a list:** `POST /webhook/{{WEBHOOK_DNC_ARCHIVED_RESPONDERS_IMPORT}}` with validated rows. It refuses the whole call if any row has an unknown reason, a `reply_dnc` without a category, or no email and no LinkedIn URL.
 - **Turn a capture source on:** flip its `FIRE_Sn` in that workflow's CONFIG node. Fire it once with a small chunk and read the dry-run report first.
 - **Turn projections on:** enable one target at a time, smallest chunk first. **The Smartlead half is irreversible** — an unsubscribe cannot be undone through the API. Confirm the candidate list before firing and read back afterwards.
 
