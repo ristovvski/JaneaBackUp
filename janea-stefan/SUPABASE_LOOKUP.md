@@ -35,25 +35,42 @@ Content-Type: application/json
 Either argument may be `null`. Send **both** whenever you have both. That is the point of the
 function (see "Why not two Lookup columns" below).
 
-The answer:
+The answer is **the pre-add gate's verdict**, field for field, so Clay and the gate can never
+disagree about a person:
 
 ```json
 {
+  "gate_result": "BLOCKED",
+  "reason": "negative_reply / campaign_reply",
+  "registry_row_ref": 12345,
   "blocked": true,
-  "block_reasons": ["person_active"],
+  "block_reasons": ["person_dnc"],
   "identity": {"identity_key": "jane-doe", "linkedin_slug": "jane-doe",
                "linkedin_url_norm": "https://www.linkedin.com/in/jane-doe", "email_lc": "jane@acme.com"},
   "domain": "acme.com",
-  "persons": [{"identity_key": "jane@acme.com", "matched_by": "email", "status": "active",
-               "reason": "...", "entry_type": "...", "reply_category": "...",
+  "persons": [{"id": 12345, "identity_key": "jane@acme.com", "matched_by": "email", "status": "active",
+               "reason": "...", "entry_type": "...", "source": "...", "reply_category": "...",
                "added_at": "...", "expires_at": null, "removed_at": null, "expired_but_active": false}],
   "company": null,
   "norm_v": "v1"
 }
 ```
 
-- **`blocked`**: the only field Clay needs to gate on.
-- **`block_reasons`**: `person_active`, `company_active`, or both.
+- **`gate_result`**: `OWN_TEAM`, `BLOCKED`, `UNRESOLVABLE` or `CLEAN`, decided in that order,
+  exactly as the pre-add gate decides it:
+  1. an `@janeasystems.com` email is `OWN_TEAM` (our own people, never in any list);
+  2. an email whose domain is an active `dnc_domains` row is `BLOCKED`, reason `company_dnc / <domain>`;
+  3. no usable LinkedIn URL or email is `UNRESOLVABLE` (it could not be checked, so it is not cleared);
+  4. an active registry row for the person is `BLOCKED`, reason `<entry_type> / <source>` of the
+     strongest row (`explicit_opt_out` > `negative_reply` > `replied` > `employee_connection` >
+     `manual`, then the oldest);
+  5. otherwise `CLEAN`, with reason `was <entry_type> until <date>, currently clean` if the person
+     only has removed rows.
+- **`blocked`**: `true` for `BLOCKED` and `OWN_TEAM`. Gate on it, but treat `UNRESOLVABLE` as
+  "not checked", not as clean.
+- **`block_reasons`**: every check that fired, not only the winning one: `own_team`, `company_dnc`,
+  `person_dnc`.
+- **`registry_row_ref`**: the id of the registry row that blocked (person blocks only).
 - **`persons`**: every registry row this person could be filed under, with `matched_by` saying how
   it was found. Use `reason` / `entry_type` if you want to show why.
 - **`expired_but_active`**: the row is past `expires_at` but still `active`. **It still blocks.**
@@ -61,7 +78,7 @@ The answer:
   make it.
 
 In Clay: an HTTP API column, `POST`, the URL above, body built from the lead's LinkedIn URL and
-email columns, then a formula column reading `blocked`.
+email columns, then a formula column reading `gate_result`.
 
 ### Status: written and tested, NOT deployed yet
 
@@ -73,10 +90,14 @@ functions, and n8n's credential cannot either. Until then `rpc/dnc_check` answer
 - the function has been executed in real Postgres 16 against the real schema file, with
   normalization identical to the production JavaScript on 28 documented cases and 600 fuzzed inputs
   (`test_dnc_check.mjs`)
+- on 13 fixture inputs its verdict is identical to the gate's own classifier code (`Classify Batch`),
+  run on the same rows; a deliberately broken copy of the function fails that comparison
 
 After deploying, run `test_dnc_check_postgrest.mjs` with the publishable key. It proves that the
-Clay key may call the function, that normalization matches, and that strangers are not blocked. It
-also proves blocking when you give it a known email and domain from the table editor.
+Clay key may call the function, that normalization matches, and that strangers are clean. Given a
+known email, domain and LinkedIn URL from the table editor (environment variables, never committed),
+it also proves blocking, the `company_dnc` reason, and that mangled forms of a LinkedIn URL resolve
+to the same row.
 
 ## Why not two Lookup columns
 
@@ -102,7 +123,7 @@ blocks:
 |---|---|---|
 | person by LinkedIn | `dnc_registry.linkedin_url_norm` | `https://www.linkedin.com/in/` + slug |
 | person by email | `dnc_registry.email_lc` | trimmed, lowercased email |
-| company | `dnc_domains.domain` | email domain, lowercased, `www.` stripped |
+| company | `dnc_domains.domain` | everything after `@` in the lowercased email (no `www.` stripping: the gate does not strip it either) |
 
 ## Normalization
 
