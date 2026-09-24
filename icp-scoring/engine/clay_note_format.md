@@ -73,8 +73,10 @@ No recorded funding and flat annual headcount …
 
 Score 78.0 × 0.80 = 62
 
-(then Tier 2 / activation guard / conflict / buying signal, each only when
- there is something to say)
+(then Tier 2 / activation guard / conflict, each only when there is
+ something to say)
+
+Buying signal (not scored): 0 — No job postings …   ← always, last
 ```
 
 `<br><br>` between blocks, `<br>` between a header and its sentence.
@@ -110,12 +112,15 @@ const note = [
 
   b(`Score ${composite.toFixed(1)} × ${multiplier.toFixed(2)} = ${final}`),
 
-  // Optional tail. Each line appears only when it has something to say, so an
-  // ordinary company's note ends at the score.
+  // Optional tail. Each line appears only when it has something to say.
   tier2_candidate ? b('Tier 2 candidate') + '<br>Enterprise scale — a different motion, not a better or worse fit.' : null,
   guard_reason    ? b('Activation guard applied') + '<br>' + guard_reason : null,
   conflict_note   ? b('Sources disagreed') + '<br>' + conflict_note : null,
-  buying_why      ? `Buying signal (not scored): ${one(buying_level)} — ${buying_why}` : null,
+
+  // ALWAYS the last line, with or without a sentence (Chrissy, 2026-09-24):
+  // the buying signal carries weight 0, and a rep who sees a level must also
+  // see that it did not move the score.
+  `Buying signal (not scored): ${one(buying_level)}${buying_why ? ` — ${buying_why}` : ''}`,
 ].filter(Boolean).join('<br><br>');
 ```
 
@@ -123,6 +128,13 @@ Notes on it:
 
 - **`.filter(Boolean)` is what makes the tail optional.** A null entry vanishes
   and takes its separator with it, so there is never a trailing blank block.
+- **The buying line is not optional.** Until 2026-09-24 it sat in the tail
+  behind `buying_why ? … : null`, and the two notes the table wrote on 22 Sep
+  (activities 47040, 47041) have no buying line at all — so nothing on them
+  said the signal was not scored. The weight is 0 in the formula, measured on
+  every live note whose levels parse (composite = the five-component weighted
+  sum, buying excluded); the line is what tells the rep so. The Clay edit is
+  this one line, nothing else in the block changes.
 - **`one()` prints `—` for a null level** rather than `null` or `0`. A level the
   table could not determine and a level of zero are different facts.
 - **`multiplier.toFixed(2)`** keeps `×0.80` rather than `×0.8`, and

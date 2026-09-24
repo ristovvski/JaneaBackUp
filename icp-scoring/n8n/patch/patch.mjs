@@ -666,6 +666,9 @@ export function buildWorkflow() {
   };
 
   const workflow = {
+    // The production name, and the one scripts/n8n_deploy.mjs PUTs: the build,
+    // not the live copy, decides it. Promoted from "WF-ICP-Score [DEV]" on
+    // 2026-09-24 — it has been running on real deals since 2026-09-17.
     name: 'WF-ICP-Score',
     nodes,
     connections,
@@ -677,7 +680,8 @@ export function buildWorkflow() {
       saveManualExecutions: true,
       callerPolicy: 'workflowsFromSameOwner',
     },
-    // DEV only, and never armed by the patcher. Arming is a human act.
+    // Never armed by the patcher. Arming is a human act; a deploy keeps
+    // whatever active state the live workflow already has.
     active: false,
   };
 

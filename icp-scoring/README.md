@@ -1,16 +1,18 @@
-# ICP v5 auto-scoring — Phase 1
+# ICP auto-scoring — Phase 1
 
 Scores the Pipedrive **Organization** behind every newly created deal against
-the Janea ICP v5 composite rubric, and writes the result back as five
-organization fields, one explanatory note and one audit row.
+the Janea ICP v6 composite rubric, and writes the result back as two
+organization fields (Auto-ICP Score, Auto-ICP Scored At) and one activity.
+The final state, for Chrissy: [`REPORT.md`](REPORT.md).
 
 ```
-Pipedrive deal.create ──▶ n8n WF-ICP-Score (Path A) ──▶ Clay ICP_Engine
+Pipedrive create.deal ──▶ n8n WF-ICP-Score (Path A) ──▶ Clay ICP table
                                                             │
                                                      7 classifiers
                                                      + score formula
+                                                     + the note
                                                             │
-  Pipedrive ◀── 5 fields + 1 note + 1 audit row ◀── n8n (Path B)
+  Pipedrive ◀── 2 fields + 1 activity ◀── n8n WF-ICP-Score (Path B)
 ```
 
 Architecture: `ICP_Scoring_Architecture_v2_1.md`. Build task: §-numbered
@@ -51,7 +53,8 @@ or the Anthropic API.
 | `scripts/` | Generators and the three Pipedrive scripts. |
 | `reports/` | The Phase 0 coverage audit and the discriminating-test proof. |
 | `RUNBOOK.md` | Operate, debug, roll back. Slack alert glossary. |
-| `REPORT.md` | What was built, what was not, every flagged decision. |
+| `REPORT.md` | The final state: what runs, the Pipedrive footprint, the note, the open decisions. |
+| `reports/BUILD_LOG.md` | The build log, 9–24 Sep: every defect, measurement and flagged decision. |
 
 ---
 
@@ -142,20 +145,22 @@ Not aspirations — each is a failing test if broken.
 
 1. **No secrets anywhere in the repo or the workflow JSON.** Credentials by
    name only. The four environment-specific values reach CONFIG from `$env`.
-2. **`active: false` in every export.** DEV project only. `/publish` is
-   human-gated and untouched.
+2. **`active: false` in every export.** Arming is a human act; a deploy
+   (`scripts/n8n_deploy.mjs`) keeps the live active state and never moves a
+   webhook path.
 3. **Every Pipedrive write is idempotent.** Three layers: the dedupe ledger
    (duplicate delivery), the 180-day/model gate (duplicate scoring run), the
    write gates (duplicate write).
-4. **`ICP Final` is never read and never written.** The patch builders check
-   `CONFIG.fields_never_write` and throw rather than silently omitting.
+4. **`Sales Rep ICP Score` is never read and never written.** The patch
+   builders check `CONFIG.fields_never_write` and throw rather than silently
+   omitting.
 5. **No invented API field or node parameter.** Where the docs are silent, the
-   code emits `NEEDS_DOC_EVIDENCE` and stops. See `REPORT.md`.
+   code emits `NEEDS_DOC_EVIDENCE` and stops. See `reports/BUILD_LOG.md`.
 
 ---
 
 ## Not in Phase 1
 
 Slack `/icp`, approve/override buttons, the manual calculator, dedup and org
-creation, Clay-side campaign scoring, and production deploy. See `REPORT.md`
-for the full scope boundary and why each is out.
+creation, and Clay-side campaign scoring. See `reports/BUILD_LOG.md` for the
+full scope boundary and why each is out.
