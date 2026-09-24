@@ -88,9 +88,29 @@ check 5's window was ~0 because the seeded 19 Aug snapshot carries today's `capt
 an archival was sanctioned. **Cross-check departures against the day's §9f.2 posts.** An undeclared
 archival wave is exactly the finding this exists to produce.
 
-## Daily job
+## Daily job — RETIRED 2026-09-08
 
-Scheduled task `i04-daily-diff`, 06:00 local. Posts to **#niks-channel** (`C0B8GCVNR5W`) — three
-lines when green, the full anomaly list when not. Scheduled tasks only run while the app is open; if
-it was closed at 06:00 the run happens at next launch, so **a missing daily post means the job did
-not run, not that the estate was clean.**
+**The scheduled task `i04-daily-diff` was deleted on 2026-09-08 (Nik's call).** Its `SKILL.md` is
+left at `~/.claude/scheduled-tasks/i04-daily-diff/SKILL.md` so the prompt is recoverable; 11 run
+sessions were archived. The scripts in this folder still work when run by hand.
+
+**Why it was killed, and the correction that matters:** the last snapshot on disk is
+`pd_2026-08-28`, but the task was **not** dead — it was still enabled and its `lastRunAt` was
+**2026-09-08T08:45:50Z**, minutes before the review. So the cron was firing and the *work* was
+silently producing nothing, which is strictly worse than not running: the schedule looked healthy
+while the invariant was not being maintained. A scheduled run is its own session, so nothing in the
+estate and nobody in the channel would ever learn it had stopped delivering.
+
+**What replaces it: nothing, deliberately.** Per the 3 Sep simplification, the surviving I-04 leg is
+`dnc_i04_event_receiver` — a live change log (≈215 events/day) with `dnc_i04_event_log_prune`
+keeping 90 days. That is the leg the team decided to keep.
+
+**What that costs, stated plainly.** The change log records changes that *happen*; it cannot answer
+"what left the estate", because an archived lead is invisible to every Pipedrive list read (see
+above). Lead-departure detection is therefore **no longer an automated check** — 29 Aug → 8 Sep is
+already unmeasurable and will stay that way. If departure detection is wanted again, the snapshot
+has to live somewhere that reports its own failure — n8n, on the estate's own error path — not a
+local Claude cron.
+
+Historic behaviour, for the record: the task ran at 06:08 local and posted to **#niks-channel**
+(`C0B8GCVNR5W`) — three lines when green, the full anomaly list when not.

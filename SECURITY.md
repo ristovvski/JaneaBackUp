@@ -1,79 +1,96 @@
-# What is in here, what was kept out, and what must not change
+# What is in here, what was removed, and what must not change
 
 ## This repository must stay private
 
-It contains, unavoidably, real data about real people:
+It holds operational runbooks, internal Slack audits that quote colleagues, and the code that writes
+to the CRM. Personal data about prospects has been pseudonymized (below), but the documents still
+describe real campaigns and real companies. Do not change its visibility.
 
-* **Prospect names, email addresses and LinkedIn URLs** throughout the task logs, repair maps and
-  incident write-ups — the specific rows are the evidence, so they cannot be anonymised without
-  destroying the audit trail.
-* **Internal Slack audits** — `docs/COMMS_AUDIT_build/` and `docs/slack_audit/` quote colleagues'
-  messages and DMs.
-* **Operational runbooks** — how to retire registry rows, how to fire a projection.
+## The history is NOT clean yet: do not add collaborators
 
-Making it public would publish all three. Anonymous access was verified as closed at the time of the
-first push; verify it again before granting access to anyone outside the team.
+Everything below is removed from the **current tree** of `main` (the 2026-09-24 scrub commit and
+everything after it). It is **still in the git history**: every commit before that scrub, including
+the ICP branch's 45 commits and the original export, carries the webhook paths and the raw session
+transcripts. A collaborator can read every commit, so until the history is rewritten this repository
+must not be shared with anyone new.
 
-## Redacted on the way in
+The rewrite (filter-repo) is postponed on purpose: only after branch cleanup, and only from a state
+with a verified backup bundle. A rewritten copy of the history already exists locally
+(`handover-main`, gate-clean across all its commits) but was not pushed, because pushing it means a
+force-push of `main`.
 
-n8n webhook paths are replaced with readable placeholders:
+## Removed from the current tree
 
-| placeholder | endpoint |
+**Credentials and callable endpoints**
+
+| what | replaced with |
 |---|---|
-| `{{WEBHOOK_WF1_HEYREACH_RECEIVER}}` | WF-1, the HeyReach receiver |
-| `{{WEBHOOK_WF2_SMARTLEAD_RECEIVER}}` | WF-2, the Smartlead receiver |
-| `{{WEBHOOK_I04_PIPEDRIVE_EVENTS}}` | I-04 Pipedrive event intake |
-| `{{WEBHOOK_DNC_S4_RETIREMENT}}` | DNC row retirement / removal |
-| `{{WEBHOOK_DNC_ARCHIVED_IMPORT}}` | archived-responder import |
-| `{{WEBHOOK_DNC_INTENT_CHECK}}` | DNC intent-vs-reality check |
-| `{{WEBHOOK_DNC_CLAIMS_PRUNE}}` | claims-table prune |
+| any value from the local `.env` | `{{SECRET:<KEY>}}` |
+| every webhook path **registered on our n8n** (28, read from the live instance), wherever it appears — bare, in a table, or inside a URL | `{{WEBHOOK_<NAME>}}` |
 
-**Why:** an n8n webhook path is the only authentication those endpoints have. Anyone holding the
-Smartlead receiver's path can inject fabricated reply events into the pipeline — creating leads,
-writing activities, firing Slack alerts, and entering people into the DNC registry. The path *is*
-the credential. It has been ruled that the exposed WF-1 secrets will not be rotated, which makes a
-durable copy of them in a git history worse rather than more acceptable: git history is not
-retractable by editing a file later.
+An n8n webhook path is the only authentication its endpoint has: holding the Smartlead receiver's
+path is enough to inject fabricated reply events, create leads, fire alerts and write DNC rows.
 
-The real values live in n8n and in the local `.env`. Resolve a placeholder there when you need it.
+**Why this had to be redone.** The 9-08 export only redacted the `/webhook/<path>` form. Every *bare*
+mention of the two production receiver paths — in inventory tables, prose, class maps — went through,
+and sat on `main` in 11 and 12 blobs (they still do, in the history). The rule is now built from the list of paths
+n8n actually serves, and it matches the path itself, not a URL shape.
 
-## Scrubbed out of the chat history
+**People**
 
-Any value present in the local `.env` is replaced with `{{SECRET:<KEY>}}` wherever it appears. This
-is not theoretical: **a live Smartlead API key was pasted into a session on 2026-07-23** and appears
-in two chat files. It is scrubbed in this repository — and it is still live in Smartlead, so it
-should be rotated there regardless of what this repository contains.
+| what | replaced with |
+|---|---|
+| external email addresses | `pii-<h8>@example.invalid` |
+| `linkedin.com/in/<slug>` | `linkedin.com/in/pii-<h8>` |
+| 242 prospect names found in our own repair maps, populations and task logs | `Person-<h8>` |
 
-One webhook path (`dnc-projections-swe…`) appears only in the chat history and in no document; the
-default-redact rule caught it. That is the reason the rule redacts unknown endpoints instead of
-passing them through.
+Tokens are an HMAC over a salt that exists only on the operator's machine: the same person is the same
+token everywhere, but a token cannot be reversed from the repository. **Team names and internal
+addresses are kept on purpose** — a runbook has to be able to say who to ask.
+
+**Stated residual:** names are found from structured records we hold plus a list of people named only
+in prose. A prospect mentioned only in free text, and absent from both, would not be matched. The
+list is re-built from the whole tree on every export, so the residual shrinks as records are added —
+it does not reach zero by construction.
+
+**Removed outright**
+
+* `chat-history/sessions/` — the raw working-session transcripts, from the tree (still in the history,
+  see above). They were bulk
+  person data by nature: every prospect ever discussed, in context, with company and title, and still
+  re-identifiable after pseudonymization. The decision record
+  (`chat-history/RULINGS_AND_INSTRUCTIONS.md`) stays, cleaned.
+* all `*.json` from the project mirror — workflow exports, API captures, repair maps, populations,
+  fixtures with real people. `icp-scoring/` keeps its own reviewed JSON (configuration and a golden
+  set of companies).
 
 ## Never committed
 
-| kind | reason |
+| kind | why |
 |---|---|
-| `*.py`, `*.ps1` | deployment tooling, not documentation. Excluded by scope, not by risk — one word adds it. |
-| `*.json` | workflow exports and API captures: credential *references*, live webhook paths, raw prospect payloads. |
-| `*.log`, `*.out` | run output. |
-| `.env`, `*.pem`, `*.key`, `*.crt` | credentials and the CA bundle. |
-| tool results in the chat history | raw API responses — the bulk of the bytes and the likeliest carrier of both secrets and unfiltered personal data. |
-| model reasoning in the chat history | not documentation. |
+| `.env`, `*.pem`, `*.key`, `*.crt` | credentials |
+| `scrub.sed`, `_pii*`, `_live_webhook*`, `_rewrite_commit_map*` | each contains exactly what the scrub removes — the secrets are the sed patterns, the salt and mapping reverse the pseudonyms, the commit map names the dirty SHAs |
+| `gtm_docs_export/` | where all of the above live, on the operator's machine |
 
-`.gitignore` enforces all of it, so a careless `git add .` cannot sweep a workflow backup in.
+`.gitignore` enforces every line of this table.
 
-## The gate that runs before every commit
+## The gate
 
-`gtm_docs_export/build_docs_repo.py` fails closed. Before anything is staged it asserts:
+`gtm_docs_export/verify_history.py <ref>` scans **every blob and every commit message reachable from
+the ref** for six things — `.env` values, registered webhook paths, callable host+`/webhook` URLs,
+external emails, LinkedIn profiles, prospect names — and exits 0 only if all six are zero.
 
-1. **No `.env` secret value** appears anywhere in the tree — checked by literal match against every
-   value in `.env` longer than 12 characters, not by pattern-guessing.
-2. **No unredacted webhook path** survives — any `/webhook/<path>` not in the placeholder table is
-   replaced with `{{WEBHOOK_REDACTED}}` rather than passed through, so an endpoint added later is
-   redacted by default instead of leaking by omission.
+Run over `main` it reports DIRTY today, by design: the history under the scrub commit has not been
+rewritten. What a pull request must pass is the same six checks over **the tip tree plus every blob and
+commit message the PR adds**: `verify_history.py --new-since origin/main <branch>`.
 
-If either check fails, nothing is committed.
+It refuses a vacuous pass: a history with no blobs, or an empty tip, is reported as a **failure**.
+That floor exists because the first run of the rewrite produced 47 commits with empty trees and the
+first version of the verifier called them clean. Its own self-test (`selftest_verifier.py`) feeds
+each check a positive and a negative, 15/15.
 
 ## If a secret does reach the history
 
-Rewriting history is the only real remedy — the file edit is not enough, the blob stays reachable.
-Rotate first, rewrite second, and assume the value is compromised from the moment it was pushed.
+Editing the file is not enough — the blob stays reachable. Rotate the secret, rewrite the history,
+force-push, and ask GitHub Support to purge cached views and orphaned objects. Treat the value as
+compromised from the moment it was pushed.

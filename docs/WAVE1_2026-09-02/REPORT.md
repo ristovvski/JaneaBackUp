@@ -4,7 +4,7 @@
 Pipedrive, Smartlead or the registry.
 
 **Workflow:** `dnc_intent_vs_reality`, id `tnW7agCbha7rhNnS`, ACTIVE, webhook-only (no schedule).
-**Run it:** `POST /webhook/{{WEBHOOK_DNC_INTENT_CHECK}}` with
+**Run it:** `POST /webhook/{{WEBHOOK_DNC_INTENT_VS_REALITY}}` with
 `{"mode":"sample","target":1000,"offset":0,"limit":50}` — the driver is
 `WAVE1_2026-09-02/build_intent_vs_reality.py` plus `ivr_run.py`.
 

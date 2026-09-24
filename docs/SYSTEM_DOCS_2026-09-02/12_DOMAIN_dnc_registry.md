@@ -138,8 +138,8 @@ Every row the ledger has inserted since at least 14 August still carries `projec
 
 ## 8. If you need to change something
 
-- **Retire rows:** `POST /webhook/{{WEBHOOK_DNC_S4_RETIREMENT}}` with `{"row_ids": [...], "dry_run": false}`. Dry-run is the default; you must pass `false` explicitly. There is no undo — re-adding means re-filing through the ledger.
-- **Import a list:** `POST /webhook/{{WEBHOOK_DNC_ARCHIVED_IMPORT}}` with validated rows. It refuses the whole call if any row has an unknown reason, a `reply_dnc` without a category, or no email and no LinkedIn URL.
+- **Retire rows:** `POST /webhook/{{WEBHOOK_DNC_S4_RETIREMENT_REMOVAL}}` with `{"row_ids": [...], "dry_run": false}`. Dry-run is the default; you must pass `false` explicitly. There is no undo — re-adding means re-filing through the ledger.
+- **Import a list:** `POST /webhook/{{WEBHOOK_DNC_ARCHIVED_RESPONDERS_IMPORT}}` with validated rows. It refuses the whole call if any row has an unknown reason, a `reply_dnc` without a category, or no email and no LinkedIn URL.
 - **Turn a capture source on:** flip its `FIRE_Sn` in that workflow's CONFIG node. Fire it once with a small chunk and read the dry-run report first.
 - **Turn projections on:** enable one target at a time, smallest chunk first. **The Smartlead half is irreversible** — an unsubscribe cannot be undone through the API. Confirm the candidate list before firing and read back afterwards.
 

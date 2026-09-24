@@ -24,7 +24,7 @@
   (literal match, not pattern-guessing) and no unredacted `/webhook/` path survives. It blocked the
   first build, correctly:
   * a **live Smartlead API key**, pasted into a session on 2026-07-23, present in two chat files;
-  * `/webhook/{{WEBHOOK_REDACTED}}…`, an endpoint that appears **only** in chat history and in no
+  * `/webhook/dnc-projections-swe…`, an endpoint that appears **only** in chat history and in no
     document — caught by the default-redact rule, which is why unknown endpoints are redacted
     rather than passed through.
 * **Webhook paths replaced with named placeholders** (7 distinct, 17 occurrences). The path is the
