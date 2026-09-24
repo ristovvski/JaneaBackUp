@@ -73,3 +73,71 @@ scrub introduces zero failures. The **13 failures are pre-existing** on the ICP 
 3. The 13 pre-existing ICP test failures — the cloud session's to look at.
 4. `docs/COMMS_AUDIT_build/` keeps its Slack audit, which quotes colleagues. Pseudonymization covers
    prospects, not colleagues. Keep, or drop from history too?
+
+## Second envelope (same day): branches, Stefan package, git identity
+
+**Done**
+- BRANCHES: GitHub has **2** `claude/*` branches, not 63 (see report table). Nothing deleted.
+- GIT IDENTITY: `gtm-docs/.git/config` → `Claude (prod duty session) <noreply@anthropic.com>` (repo-local;
+  global config untouched). History rewrite remaps only the 4 commits made under the wrong
+  "Mykyta Kryvonos" identity; 27 "Mykyta"/"Mykyta Krivosheia" commits left alone pending Nik (REMAP_EXTRA).
+- STEFAN PACKAGE `janea-stefan/` (8 files, in commit B of handover-main): README, README_OPERATOR,
+  ACCESS_MAP, SUPABASE_LOOKUP (new; replaces the stale Phase-1 README_STEFAN), NORMALIZATION_RULES
+  (+ addendum: 4 code-vs-prose details; prospect name in example 5 replaced by "Jane Roe"),
+  DNC_CHECK.sql, test_dnc_check.mjs, test_dnc_check_postgrest.mjs.
+- DNC_CHECK.sql: `dnc_check(p_linkedin_url, p_email)` → person by slug OR email + company domain.
+  PGlite (Postgres 16.4) vs real schema file: 12/12, parity with normalize_v1.js 28 cases + 600 fuzz.
+- PostgREST, live (via n8n "Supabase account" credential, throwaway probe workflow, deleted):
+  every column the function reads exists (bad column → 400, non-vacuous); registry 25,864 rows /
+  25,858 active; domains 1,373; **408 active people keyed by email with no LinkedIn** (the
+  population the single identity_key Lookup can miss); `rpc/dnc_check` → 404 PGRST202 = NOT DEPLOYED.
+- handover-main rebuilt: 49 commits, 1,389 files; verify_history CLEAN (now with check 1b);
+  selftest 26/26; clobber 0/0; ICP tests 168/181 with a failure set identical to the original branch.
+
+**Found (serious, fixed before any push)**
+- A live **Supabase publishable key** was in chat-history/RULINGS (a pasted RLS-test curl). It was
+  never in .env, so the exact-value gate could not see it; the ICP scanner's `bearer` rule did.
+  Not on GitHub (0 commits on any remote ref). Fix: KEY_RULES in handover_scrub (sb_publishable_ /
+  sb_secret_ / JWT shapes) + gate check 1b; proved the check fires on the pre-fix branch.
+- The pseudonymizer was hashing SYNTHETIC fixtures (jane-doe, Jane@Acme.com…) — broke the DNC tests
+  and garbled the worked examples, including the copy already in handover-main. Fix: enumerated
+  SYNTHETIC_EMAILS / SYNTHETIC_SLUGS + shared is_pii_slug() used by scrub AND gate.
+- ICP scanner's 1,099 findings classified (classify_scanner_hits.py, local): 27 distinct 40-hex =
+  all live Pipedrive field keys; 188 UUIDs = n8n versionIds/node ids, lead ids, label ids, Clay
+  public package ids, session path segments, Smartlead stats ids; webhook URLs = placeholders.
+  One credential total (the Supabase key).
+
+**Blocked**
+- Deploying DNC_CHECK.sql needs the Supabase SQL editor (Nik or Stefan). Then run
+  probe_dnc_check_live.py (ours) and test_dnc_check_postgrest.mjs (Clay key).
+- Push / branch deletion / filter-repo: waiting for Nik's branch list and GO.
+
+**Improvable**
+- Bash heredoc ate backslashes 3 more times this segment (known trap) — each caught by a syntax
+  error or a probe, but writing Python patches through Edit/`chr(92)` from the start avoids it.
+- A generic secret gate built from .env values alone is blind to anything pasted; shape rules
+  have to run beside it.
+
+## Third envelope: backup first, nothing deleted
+
+- "63 branches" does not match Nkriv/Janea: `git ls-remote` = 3 heads (main + 2 claude/*), no
+  `git-init-…` branch. No local repo has more than 4 refs. So step 3 had no target; nothing deleted.
+- BACKUP: `janea-full-backup-2026-09-24.bundle` (5,741,603 bytes, sha256 199e1e7b…1e35) in the project
+  folder (outside the repo), `git bundle create --all` after a fresh fetch. Holds the pre-rewrite
+  old main 9f0fa3d, which is NOT on GitHub (only gtm-docs and Documents/GitHub/Janea have it).
+  Restore test: clone --mirror into scratchpad, fsck --full clean, 6/6 refs identical by sha+name,
+  every GitHub ref present, 99/99 commits reachable; temp clone deleted. Copy sent to Nik.
+- MERGE (no rewrite): `gtm_docs_export/build_merge_main.py` → merge-main = M (merge --no-ff ICP tip
+  into main; main was its ancestor, 0 commits lost) + A (scrub/pseudonymize tree = handover-main~1)
+  + B (ops docs + janea-stefan tree = handover-main). Pushed fast-forward: main 93af79e → 95da8f4.
+  904 new blobs all clean; history under M still dirty (was already on GitHub).
+- Collision: the DNC session messaged that Nik gave it the same push, arriving right after mine.
+  Told it main had moved and to stack on 95da8f4; I push nothing more.
+- Still pending: filter-repo (after branch cleanup, from a verified bundle); ICP session's keep list;
+  DNC_CHECK.sql deploy; REMAP of the 27 "Mykyta" commits (only matters for the rewrite now).
+
+## Close-out (Nik)
+- Keep `claude/icp-scoring-…` (lands via the ICP session's PR). `dreamy-wozniak` pending the DNC
+  session's answer on whether 0c37555 is its pre-squash root.
+- filter-repo postponed: only after both PRs land, a verified bundle exists, and Stefan has cloned.
+- This session is done on the repo; the DNC session owns further pushes.
