@@ -801,7 +801,46 @@ describe('the graph', () => {
   });
 });
 
+describe('production naming', () => {
+  test('the build is named WF-ICP-Score — no [DEV], no [PROD]', () => {
+    // It runs on real deals, so it is production; the estate's production
+    // workflows carry no suffix (WF-1 HeyReach Receiver, WF-ERR).
+    assert.equal(wf.name, 'WF-ICP-Score');
+  });
+
+  test('the deploy PUTs the build\'s name and inherits the live webhook paths', () => {
+    const source = readFileSync(join(ROOT, 'scripts', 'n8n_deploy.mjs'), 'utf8');
+    assert.match(source, /name: built\.name/, 'the build decides the name');
+    assert.ok(!/name: live\.name/.test(source), 'the live name must not win over the build');
+    assert.match(source, /inherit\('ICP_WEBHOOK_PATH_A', livePaths\['Webhook Pipedrive'\]\)/);
+    assert.match(source, /inherit\('ICP_WEBHOOK_PATH_B', livePaths\['Webhook Clay'\]\)/);
+    assert.match(source, /would move off its live path/, 'and refuses to change them');
+  });
+});
+
 describe("the human's field is never written", () => {
+  test('Sales Rep ICP Score is a single-select: A, B, C, D — not a fit', () => {
+    // Chrissy, 2026-09-24. The committed template is the spec; a live registry,
+    // when present, must agree with it option for option.
+    for (const file of ['pipedrive_fields.json', 'pipedrive_fields.local.json']) {
+      let registry;
+      try { registry = JSON.parse(readFileSync(join(ROOT, 'config', file), 'utf8')); } catch { continue; }
+      const spec = registry.fields.sales_rep_icp_score;
+      assert.equal(spec.name, 'Sales Rep ICP Score', file);
+      assert.equal(spec.field_type, 'enum', `${file}: a single-select, not text`);
+      assert.deepEqual(Object.keys(spec.options), ['A', 'B', 'C', 'D — not a fit'], file);
+    }
+  });
+
+  test('CONFIG carries no option id for the rep field, so there is nothing to write it with', () => {
+    // The key is in CONFIG only so the guards can name it. An option id would
+    // be the one thing a write needs, and nothing here has a reason to hold one.
+    const config = buildConfig();
+    const text = JSON.stringify(config);
+    assert.ok(!/sales_rep_icp_score_options|opt_sales_rep/.test(text));
+    assert.equal(Object.keys(config).filter((k) => /sales_rep/.test(k)).join(), 'f_sales_rep_icp_score');
+  });
+
   test('no node references the Sales Rep key outside the never-write guard', () => {
     for (const node of wf.nodes) {
       if (/^CONFIG/.test(node.name)) continue;

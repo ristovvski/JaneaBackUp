@@ -218,8 +218,10 @@ icp_audit Data Table was dropped so that a Path B run has no node which can go
 red for a reason unrelated to the score.
 
 Three organization fields, created by `scripts/pipedrive_create_fields.mjs`:
-Auto-ICP Score (text), Auto-ICP Scored At (date), Sales Rep ICP Score (text).
-The workflow writes the first two, together, and never the third.
+Auto-ICP Score (text), Auto-ICP Scored At (date), and Sales Rep ICP Score — a
+**single-select**, options A, B, C, D — not a fit (recreated from a text field
+on 2026-09-24). The workflow writes the first two, together, and never the
+third.
 
 ### 7. Register the Pipedrive webhook
 
@@ -394,7 +396,12 @@ Then, because two of the four consumers are outside this repo:
 
 1. Re-paste the seven prompts into the Clay AI columns.
 2. Re-paste `engine/clay_formula.txt` STEP 3 into `score_json`.
-3. Re-import the workflow into DEV.
+3. Deploy the workflow — the safe patch, dry-run first:
+
+```bash
+node scripts/n8n_deploy.mjs <workflow-id> --dry-run   # the plan: name, nodes added/removed, paths
+node scripts/n8n_deploy.mjs <workflow-id>             # rollback saved, PUT, re-GET, "DIFFS none"
+```
 
 **Bump `model_version`** if the change alters scores. Every organization scored
 on the old version then re-scores automatically on its next deal, because the
@@ -406,18 +413,22 @@ with nothing to tell them apart.
 
 ## Rolling back
 
-The workflow is a build artefact, so rollback is a rebuild.
+Every deploy saves the live version it replaced before it PUTs, outside the
+repository (it carries the webhook paths), and prints the command to put it back:
 
 ```bash
-git log --oneline -- icp-scoring/n8n/workflows/WF-ICP-Score.dev.json
-git checkout <sha> -- icp-scoring/
-npm test
-node n8n/patch/patch.mjs --check     # confirms the export matches its sources
-# re-import into DEV
+node scripts/n8n_deploy.mjs <workflow-id> --rollback $TMPDIR/icp-deploy/<workflow-id>-<versionId>.json
 ```
 
-Before any re-import, record the current `versionId` from n8n so you can get
-back. The Pipedrive **data** is not rolled back by any of this: a wrong grade
+Or rebuild an older source — the workflow is a build artefact:
+
+```bash
+git checkout <sha> -- icp-scoring/
+npm test
+node scripts/n8n_deploy.mjs <workflow-id> --dry-run
+```
+
+The Pipedrive **data** is not rolled back by any of this: a wrong grade
 already written stays until the next scoring run overwrites it.
 
 ---
@@ -446,12 +457,14 @@ curl -X DELETE -H "x-api-token: $PIPEDRIVE_API_TOKEN" \
 
 Worth knowing before you go looking for a bug that is a design decision.
 
-- **Never write `ICP Final`.** It is the human's field.
-- **Never read `ICP Final`** as scoring input.
+- **Never write `Sales Rep ICP Score`.** It is the human's field — asserted in
+  both patch builders and in the static suite, not merely omitted.
+- **Never read `Sales Rep ICP Score`** as scoring input.
 - **Never create or merge an organization.** It scores what exists.
 - **Never contact anyone.** No email, no LinkedIn, no sequence. A DNC'd
   company still gets scored — that is an internal analytical act, not contact.
 - **Never write the same value twice.** An unchanged value produces an empty
   patch and no API call.
-- **Never publish to production.** `/publish` is human-gated and this repo
-  does not implement it.
+- **Never change a webhook path on deploy.** `scripts/n8n_deploy.mjs` inherits
+  both paths from the live workflow and refuses a build that would move one:
+  the Pipedrive subscription and the Clay callback column hold them.

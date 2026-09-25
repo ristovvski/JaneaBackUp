@@ -1,0 +1,129 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://janeasystems.com/icp/icp_scored_event.schema.json",
+  "title": "icp.scored event",
+  "description": "What the Clay `post_to_n8n` HTTP column POSTs to n8n Path B. Everything the org patch, the note (§8.3) and the audit row (§8.4) need is here, so Path B never has to re-enrich or re-score from scratch. `additionalProperties: false` throughout: an unexpected key means Clay changed and we want to hear about it loudly, at the boundary.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event", "event_id", "request_id", "emitted_at", "model_version",
+    "org_id", "identifier_kind", "identifier_value", "components", "score", "facts_summary"
+  ],
+  "properties": {
+    "event":       { "const": "icp.scored" },
+    "event_id":    { "type": "string", "minLength": 8, "description": "Clay row-run id; the Path B dedupe key" },
+    "request_id":  { "type": "string", "minLength": 1, "description": "the n8n correlation id issued on Path A" },
+    "emitted_at":  { "type": "string", "minLength": 10, "description": "ISO 8601" },
+    "model_version": { "const": "v5" },
+
+    "org_id":  { "type": "string", "minLength": 1 },
+    "deal_id": { "type": ["string", "null"] },
+
+    "identifier_kind":  { "enum": ["domain", "linkedin", "name"] },
+    "identifier_value": { "type": "string", "minLength": 1 },
+
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "industry_vertical", "stage_maturity", "company_type",
+        "geography", "revenue_range", "activation_state", "buying_signal"
+      ],
+      "properties": {
+        "industry_vertical": { "$ref": "#/definitions/component" },
+        "stage_maturity":    { "$ref": "#/definitions/component" },
+        "company_type":      { "$ref": "#/definitions/component" },
+        "geography":         { "$ref": "#/definitions/component" },
+        "revenue_range":     { "$ref": "#/definitions/component" },
+        "activation_state":  { "$ref": "#/definitions/component" },
+        "buying_signal":     { "$ref": "#/definitions/component" }
+      }
+    },
+
+    "score": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_version", "industry_level", "levels_used", "composite",
+        "activation_state_used", "multiplier", "final_score",
+        "final_score_without_activation", "grade", "status",
+        "confidence_overall", "tier2_candidate", "flags"
+      ],
+      "properties": {
+        "model_version":  { "const": "v5" },
+        "industry_level": { "enum": [0, 3, 7, 10] },
+        "industry_tier":  { "type": ["string", "null"], "enum": ["Anchor", "Watch", "Opportunistic", "Out", null] },
+        "levels_used": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["industry", "stage_maturity", "company_type", "geography", "revenue_range", "buying_signal"],
+          "properties": {
+            "industry":       { "enum": [0, 3, 7, 10] },
+            "stage_maturity": { "enum": [0, 3, 7, 10] },
+            "company_type":   { "enum": [0, 3, 7, 10] },
+            "geography":      { "enum": [0, 3, 7, 10] },
+            "revenue_range":  { "enum": [0, 3, 7, 10] },
+            "buying_signal":  { "enum": [0, 3, 7, 10] }
+          }
+        },
+        "buying_signal_level": { "oneOf": [{ "enum": [0, 3, 7, 10] }, { "type": "null" }] },
+        "composite":             { "type": "number", "minimum": 0, "maximum": 100 },
+        "activation_state_used": { "enum": ["Accelerating", "Transitioning", "Stable", "Contracting"] },
+        "multiplier":            { "enum": [0, 0.85, 1] },
+        "final_score":                    { "type": "integer", "minimum": 0, "maximum": 100 },
+        "final_score_without_activation": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "grade":  { "oneOf": [{ "enum": ["A", "B", "C"] }, { "type": "null" }] },
+        "status": { "enum": ["scored", "insufficient_data"] },
+        "confidence_overall": { "enum": ["high", "medium", "low"] },
+        "tier2_candidate":    { "type": "boolean" },
+        "flags": { "type": "array", "items": { "type": "string" }, "maxItems": 20 }
+      }
+    },
+
+    "facts_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revenue_usd", "headcount_total", "headcount_eng"],
+      "properties": {
+        "revenue_usd":     { "type": ["number", "null"], "minimum": 0 },
+        "headcount_total": { "type": ["integer", "null"], "minimum": 0 },
+        "headcount_eng":   { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+
+    "clay_table": { "type": ["string", "null"], "description": "source table name, for the audit trail" },
+    "clay_row_url": { "type": ["string", "null"] }
+  },
+
+  "definitions": {
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "evidence", "confidence", "missing_inputs"],
+      "properties": {
+        "value": { "oneOf": [{ "enum": [0, 3, 7, 10] }, { "type": "string" }, { "type": "null" }] },
+        "evidence": { "type": "array", "items": { "type": "string", "maxLength": 200 }, "maxItems": 6 },
+        "confidence": { "enum": ["high", "medium", "low"] },
+        "missing_inputs": { "type": "array", "items": { "type": "string" } },
+        "evidence_dated_within_months": { "type": ["integer", "null"] }
+      }
+    },
+
+    "grade_null_when_insufficient": {
+      "comment": "Enforced by schemas.test.mjs rather than by JSON Schema: status insufficient_data implies grade null, and vice versa."
+    }
+  },
+
+  "allOf": [
+    {
+      "comment": "insufficient_data and a grade are mutually exclusive (S6).",
+      "if": { "properties": { "score": { "properties": { "status": { "const": "insufficient_data" } }, "required": ["status"] } }, "required": ["score"] },
+      "then": { "properties": { "score": { "properties": { "grade": { "type": "null" } } } } }
+    },
+    {
+      "comment": "A scored event must carry a grade.",
+      "if": { "properties": { "score": { "properties": { "status": { "const": "scored" } }, "required": ["status"] } }, "required": ["score"] },
+      "then": { "properties": { "score": { "properties": { "grade": { "enum": ["A", "B", "C"] } } } } }
+    }
+  ]
+}

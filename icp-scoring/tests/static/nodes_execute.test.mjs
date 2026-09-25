@@ -844,10 +844,22 @@ describe('BuildOrgPatch — two fields, written together, and nothing else', () 
   });
 
   test('a pre-existing Sales Rep ICP Score is left exactly as it was', () => {
+    // The field is a single-select since 2026-09-24, so what a rep leaves on
+    // the org is an option id, not text. 1 stands in for whichever of A/B/C/D
+    // they picked; the real ids live only in the gitignored registry.
     const { out } = patchFor('icp_scored_A.json', 'org_full.json', (org) => {
-      org.custom_fields = { ...(org.custom_fields || {}), [cfg.f_sales_rep_icp_score]: '80 - A' };
+      org.custom_fields = { ...(org.custom_fields || {}), [cfg.f_sales_rep_icp_score]: 1 };
     });
     assert.ok(!(cfg.f_sales_rep_icp_score in out.patch.custom_fields));
+  });
+
+  test('a grade that disagrees with the rep still leaves the rep field alone', () => {
+    // The rep picked "D — not a fit"; the table says A. Both stand, side by side.
+    const { out } = patchFor('icp_scored_A.json', 'org_full.json', (org) => {
+      org.custom_fields = { ...(org.custom_fields || {}), [cfg.f_sales_rep_icp_score]: 4 };
+    });
+    assert.ok(!(cfg.f_sales_rep_icp_score in out.patch.custom_fields));
+    assert.match(out.auto_icp_score, / - A$/);
   });
 
   test('the patch body carries nothing at the top level', () => {

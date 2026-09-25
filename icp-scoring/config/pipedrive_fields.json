@@ -14,8 +14,26 @@
     },
     "sales_rep_icp_score": {
       "name": "Sales Rep ICP Score",
-      "field_type": "varchar",
-      "purpose": "The human's field. Created by this repo so it exists next to the automatic one, and NEVER written to \u2014 asserted in BuildOrgPatch and in the static suite, not merely omitted.",
+      "field_type": "enum",
+      "purpose": "The human's field. A single-select, options A, B, C and \"D — not a fit\" (Chrissy, 2026-09-24), so a rep's grade is one of four values rather than free text that a report cannot count. Created by this repo so it sits next to the automatic one, and NEVER written to — asserted in BuildOrgPatch and BuildNoWebsiteWrite and in the static suite, not merely omitted. It replaced a text field of the same name on 2026-09-24: across 21,871 organizations the text field held one value, a test fixture this repo had planted, so nothing was migrated.",
+      "options": {
+        "A": {
+          "id": null,
+          "label": "A"
+        },
+        "B": {
+          "id": null,
+          "label": "B"
+        },
+        "C": {
+          "id": null,
+          "label": "C"
+        },
+        "D — not a fit": {
+          "id": null,
+          "label": "D — not a fit"
+        }
+      },
       "key": "PLACEHOLDER_sales_rep_icp_score_00000000000000000000000000000",
       "id": null
     },
