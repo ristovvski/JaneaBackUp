@@ -51,6 +51,13 @@ in prose. A prospect mentioned only in free text, and absent from both, would no
 list is re-built from the whole tree on every export, so the residual shrinks as records are added —
 it does not reach zero by construction.
 
+**Known residual: our own email addresses (Nik's decision, 2026-09-25).** The tree still holds 28
+distinct addresses on our own domains (`janeasystems.com` and the outbound sending domains): 153
+occurrences in 37 files, in test fixtures, routing tables and the rulings record. No third-party
+address remains; every external one is a `pii-<h8>@example.invalid` token. They stay deliberately: the
+repository is private, both of its readers are under NDA, and this class of data falls under the open
+data-processing (DPA) question with Sergey. Counted on `a316b80`; recount before relying on the number.
+
 **Removed outright**
 
 * `chat-history/sessions/` — the raw working-session transcripts, from every commit. They were bulk
