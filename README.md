@@ -10,8 +10,8 @@ it is, how it behaves, what has broken, what was decided about it, and the scrip
 2. [`ACCESS_MAP.md`](ACCESS_MAP.md) — every system, the role you need, and what you cannot diagnose
    without each one.
 3. [`SECURITY.md`](SECURITY.md) — what was removed from this repository and why. Read it before
-   adding anything. **The current tree is scrubbed; the git history is not yet** — until the history
-   rewrite has run, this repository must not be shared with anyone new.
+   adding anything. The whole history was rewritten on 2026-09-25; nothing sensitive is reachable
+   from any branch.
 
 ## The estate in one paragraph
 

@@ -6,20 +6,18 @@ It holds operational runbooks, internal Slack audits that quote colleagues, and 
 to the CRM. Personal data about prospects has been pseudonymized (below), but the documents still
 describe real campaigns and real companies. Do not change its visibility.
 
-## The history is NOT clean yet: do not add collaborators
+## Removed from the ENTIRE history, not just the current tree
 
-Everything below is removed from the **current tree** of `main` (the 2026-09-24 scrub commit and
-everything after it). It is **still in the git history**: every commit before that scrub, including
-the ICP branch's 45 commits and the original export, carries the webhook paths and the raw session
-transcripts. A collaborator can read every commit, so until the history is rewritten this repository
-must not be shared with anyone new.
+A collaborator can read every commit, so cleaning only the latest one protects nothing. On
+2026-09-25 every commit reachable from `main` was rewritten blob by blob and force-pushed, after a
+restore-tested backup bundle; every other branch was deleted first. The full-history gate reports zero
+across all of it. Authors, dates and commit order are unchanged; commit IDs are new.
 
-The rewrite (filter-repo) is postponed on purpose: only after branch cleanup, and only from a state
-with a verified backup bundle. A rewritten copy of the history already exists locally
-(`handover-main`, gate-clean across all its commits) but was not pushed, because pushing it means a
-force-push of `main`.
+**One residual, until GitHub Support acts:** the two closed pull requests (#1, #2) still pin
+pre-rewrite commits on GitHub's side, and those stay retrievable by SHA until Support purges them.
+Anyone who cloned before 2026-09-25 also still holds the old history locally.
 
-## Removed from the current tree
+## What was removed
 
 **Credentials and callable endpoints**
 
@@ -33,7 +31,7 @@ path is enough to inject fabricated reply events, create leads, fire alerts and 
 
 **Why this had to be redone.** The 9-08 export only redacted the `/webhook/<path>` form. Every *bare*
 mention of the two production receiver paths — in inventory tables, prose, class maps — went through,
-and sat on `main` in 11 and 12 blobs (they still do, in the history). The rule is now built from the list of paths
+and sat on `main` in 11 and 12 blobs until the rewrite. The rule is now built from the list of paths
 n8n actually serves, and it matches the path itself, not a URL shape.
 
 **People**
@@ -55,8 +53,7 @@ it does not reach zero by construction.
 
 **Removed outright**
 
-* `chat-history/sessions/` — the raw working-session transcripts, from the tree (still in the history,
-  see above). They were bulk
+* `chat-history/sessions/` — the raw working-session transcripts, from every commit. They were bulk
   person data by nature: every prospect ever discussed, in context, with company and title, and still
   re-identifiable after pseudonymization. The decision record
   (`chat-history/RULINGS_AND_INSTRUCTIONS.md`) stays, cleaned.
@@ -80,9 +77,10 @@ it does not reach zero by construction.
 the ref** for six things — `.env` values, registered webhook paths, callable host+`/webhook` URLs,
 external emails, LinkedIn profiles, prospect names — and exits 0 only if all six are zero.
 
-Run over `main` it reports DIRTY today, by design: the history under the scrub commit has not been
-rewritten. What a pull request must pass is the same six checks over **the tip tree plus every blob and
-commit message the PR adds**: `verify_history.py --new-since origin/main <branch>`.
+Since the rewrite, run over `main` it must report CLEAN across the whole history. A pull request
+must pass the same checks over **the tip tree plus every blob and commit message it adds**:
+`verify_history.py --new-since origin/main <branch>`. A branch that fails it must not be merged:
+merging brings its dirty commits into `main`'s history, even when its tip is clean.
 
 It refuses a vacuous pass: a history with no blobs, or an empty tip, is reported as a **failure**.
 That floor exists because the first run of the rewrite produced 47 commits with empty trees and the
